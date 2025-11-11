@@ -1,9 +1,6 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": ".mastra/output",
-  "framework": null,
-  "env": {
-    "OPENAI_API_KEY": "@openai-api-key"
-  }
+  "framework": null
 }
 
