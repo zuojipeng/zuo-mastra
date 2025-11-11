@@ -72,35 +72,19 @@ npm run dev
 - 注意事项：根据实际需求填写 [...] 中的内容
 ```
 
-## 🚀 部署到 Cloudflare Pages
+## 🚀 部署到 Vercel
 
-### 方式 1：通过 Dashboard（推荐）
+### 通过 Vercel Dashboard（推荐）
 
 1. 推送代码到 GitHub
-2. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
-3. **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**
-4. 选择仓库并配置：
-   ```
-   Build command: npm run build
-   Build output directory: .mastra/output
-   ```
+2. 访问 [Vercel](https://vercel.com/)
+3. 点击 **Import Project**
+4. 选择 `zuo-mastra` 仓库
 5. 添加环境变量：
    - `OPENAI_API_KEY`: 你的密钥
-6. 部署完成！
+6. 点击 **Deploy**
 
-### 方式 2：使用 Wrangler CLI
-
-```bash
-# 安装并登录
-npm install -g wrangler
-wrangler login
-
-# 构建并部署
-npm run build
-wrangler pages deploy .mastra/output --project-name=prompt-optimizer
-```
-
-详细部署说明：查看 [DEPLOYMENT.md](./DEPLOYMENT.md)
+详细部署说明：查看 [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md)
 
 ## 🧪 本地测试
 
@@ -131,25 +115,37 @@ interactive-test.ts                 # 交互式测试
 - **语言**: TypeScript
 - **数据库**: LibSQL
 
-## 💡 架构说明
+## 💡 使用方式
 
-Mastra 自动生成前端和 API，你不需要单独创建前端项目：
+### 作为独立 API 服务
 
+将 Agent 部署为纯 API，在任何前端项目中调用。
+
+**推荐平台：Vercel**（Mastra 完美兼容）
+
+```bash
+# 1. 推送代码到 GitHub
+git push origin main
+
+# 2. 访问 vercel.com 导入项目
+# 3. 添加环境变量 OPENAI_API_KEY
+# 4. 部署完成！
+
+# 在前端调用
+fetch('https://your-project.vercel.app/api/agents/promptOptimizerAgent/generate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    messages: [{ role: 'user', content: '帮我翻译这段话' }]
+  })
+})
 ```
-你的代码（src/mastra/）
-    ↓
-npm run build
-    ↓
-.mastra/output/（自动生成前端 + 后端 + API）
-    ↓
-部署到 Cloudflare
-```
 
-API 端点：
-- `POST /api/agents/promptOptimizerAgent/generate` - 调用 Agent
-- `GET /api/agents` - 获取 Agent 列表
+详细说明：[VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md)
 
-详细说明：[DEPLOYMENT.md](./DEPLOYMENT.md)
+**前端示例：**
+- React: `frontend-examples/react-example.tsx`
+- 原生 JS: `frontend-examples/vanilla-js-example.html`
 
 ## 📝 许可
 
