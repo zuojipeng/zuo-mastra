@@ -74,14 +74,12 @@ export default {
         process.env.OPENAI_API_KEY = env.OPENAI_API_KEY;
 
         // 调用 Agent
-        const response = await promptOptimizerAgent.generate({
-          messages: [
-            {
-              role: 'user',
-              content: message,
-            },
-          ],
-        });
+        const response = await promptOptimizerAgent.generate([
+          {
+            role: 'user',
+            content: message,
+          },
+        ]);
 
         return new Response(
           JSON.stringify({
