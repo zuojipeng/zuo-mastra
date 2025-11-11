@@ -1,9 +1,15 @@
 name = "prompt-optimizer"
-main = "workers-entry.ts"
+main = "workers-entry-d1.ts"
 compatibility_date = "2024-09-23"
 
 # Node.js 兼容性标志
 compatibility_flags = ["nodejs_compat"]
+
+# D1 数据库配置
+[[d1_databases]]
+binding = "DB"
+database_name = "prompt-optimizer-db"
+database_id = "f02d2d29-2553-4fd9-bb5b-acf29abd6a42"
 
 # 环境变量通过 wrangler secret 设置
 # wrangler secret put OPENAI_API_KEY

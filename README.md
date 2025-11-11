@@ -1,153 +1,295 @@
-# 🎯 AI 智能提示词优化 Agent
+# 🎯 AI 提示词优化 Agent
 
-帮助用户优化 AI 提示词的智能助手，让普通人也能写出专业级的提示词。
+基于 Mastra 框架开发的智能提示词优化助手，部署在 Cloudflare Workers + D1，支持对话记忆。
 
 ## ✨ 功能
 
 - 📊 分析原始提示词的问题
-- ✨ 生成优化后的多个版本  
+- ✨ 生成优化后的多个版本
 - 💡 提供详细的改进建议
-- 🎯 支持各类 AI 工具场景
+- 🧠 支持对话记忆（D1 持久化存储）
+- 🌍 全球 CDN 部署（Cloudflare Workers）
 
-## 🚀 快速开始
+## 🚀 快速部署
 
-### 1. 克隆并安装
+### 1. 克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/你的仓库名.git
-cd 你的仓库名
+git clone https://github.com/zuojipeng/zuo-mastra.git
+cd zuo-mastra
 npm install
 ```
 
-### 2. 配置 API Key
-
-创建 `.env` 文件：
+### 2. 初始化数据库
 
 ```bash
-OPENAI_API_KEY=sk-proj-你的OpenAI密钥
+# 数据库已创建，直接初始化表结构
+wrangler d1 execute prompt-optimizer-db --file=schema.sql
 ```
 
-> 获取密钥：https://platform.openai.com/api-keys
-
-### 3. 启动
+### 3. 配置 API Key
 
 ```bash
-npm run dev
+wrangler secret put OPENAI_API_KEY
+# 输入你的 OpenAI API Key
 ```
 
-访问 `http://localhost:3000`，选择 **Prompt Optimizer Agent** 开始使用。
-
-## 🌐 在线体验
-
-部署后的地址：`https://your-project.pages.dev`
-
-## 📖 使用示例
-
-**输入：**
-```
-帮我写个文章
-```
-
-**输出：**
-```
-📊 原始提示词分析
-- 用户意图：需要生成文章
-- 当前问题：缺少主题、受众、风格等信息
-- 适用场景：文本生成类 AI 工具
-
-✨ 优化后的提示词
-版本 1：通用优化版
-请帮我写一篇关于 [具体主题] 的文章...
-
-版本 2：详细增强版
-我需要一篇关于 [具体主题] 的 [文章类型] 文章...
-
-💡 优化要点说明
-1. 明确主题：让 AI 有明确方向
-2. 定义受众：AI 能调整语言风格
-...
-
-🎯 使用建议
-- 推荐场景：任何需要 AI 生成长文本的场景
-- 注意事项：根据实际需求填写 [...] 中的内容
-```
-
-## 🚀 部署到 Vercel
-
-### 通过 Vercel Dashboard（推荐）
-
-1. 推送代码到 GitHub
-2. 访问 [Vercel](https://vercel.com/)
-3. 点击 **Import Project**
-4. 选择 `zuo-mastra` 仓库
-5. 添加环境变量：
-   - `OPENAI_API_KEY`: 你的密钥
-6. 点击 **Deploy**
-
-详细部署说明：查看 [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md)
-
-## 🧪 本地测试
+### 4. 部署
 
 ```bash
-# 自动测试（预设案例）
-npx tsx test-prompt-optimizer.ts
+wrangler deploy
+```
 
-# 交互式测试（输入你自己的提示词）
-npx tsx interactive-test.ts
+完成！🎉
+
+## 📡 API 使用
+
+### 端点 1：优化提示词
+
+```bash
+POST https://prompt-optimizer.hahazuo460.workers.dev/api/optimize
+```
+
+**请求示例：**
+
+```javascript
+const response = await fetch('https://prompt-optimizer.hahazuo460.workers.dev/api/optimize', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-User-Id': 'user123',      // 可选：用户ID，启用记忆功能
+    'X-Session-Id': 'session456' // 可选：会话ID，隔离不同对话
+  },
+  body: JSON.stringify({
+    message: '帮我翻译这段话'
+  })
+});
+
+const data = await response.json();
+console.log(data.data.optimizedPrompt);
+```
+
+**响应示例：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "originalPrompt": "帮我翻译这段话",
+    "optimizedPrompt": "📊 原始提示词分析\n...",
+    "sessionId": "session456",
+    "hasHistory": true
+  },
+  "metadata": {
+    "model": "gpt-4o-mini",
+    "timestamp": "2025-11-11T14:56:13.420Z",
+    "historyCount": 3
+  }
+}
+```
+
+### 端点 2：查看历史记录
+
+```bash
+GET https://prompt-optimizer.hahazuo460.workers.dev/api/history
+```
+
+**请求示例：**
+
+```javascript
+const response = await fetch('https://prompt-optimizer.hahazuo460.workers.dev/api/history', {
+  headers: {
+    'X-User-Id': 'user123',
+    'X-Session-Id': 'session456'
+  }
+});
+
+const data = await response.json();
+console.log(data.data.history);
+```
+
+### 端点 3：健康检查
+
+```bash
+GET https://prompt-optimizer.hahazuo460.workers.dev/api/health
+```
+
+## 💻 前端集成示例
+
+### React 示例
+
+```tsx
+import { useState } from 'react';
+
+const API_URL = 'https://prompt-optimizer.hahazuo460.workers.dev/api/optimize';
+
+export default function PromptOptimizer() {
+  const [input, setInput] = useState('');
+  const [result, setResult] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // 生成或获取用户ID
+  const userId = localStorage.getItem('userId') || `user-${Date.now()}`;
+  const sessionId = sessionStorage.getItem('sessionId') || `session-${Date.now()}`;
+
+  const handleOptimize = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': userId,
+          'X-Session-Id': sessionId,
+        },
+        body: JSON.stringify({ message: input })
+      });
+
+      const data = await response.json();
+      setResult(data.data.optimizedPrompt);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <textarea 
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="输入要优化的提示词"
+      />
+      <button onClick={handleOptimize} disabled={loading}>
+        {loading ? '优化中...' : '优化提示词'}
+      </button>
+      {result && <pre>{result}</pre>}
+    </div>
+  );
+}
+```
+
+### 原生 JavaScript 示例
+
+```javascript
+async function optimizePrompt(message) {
+  // 生成或获取用户ID和会话ID
+  let userId = localStorage.getItem('userId');
+  if (!userId) {
+    userId = `user-${Date.now()}`;
+    localStorage.setItem('userId', userId);
+  }
+
+  let sessionId = sessionStorage.getItem('sessionId');
+  if (!sessionId) {
+    sessionId = `session-${Date.now()}`;
+    sessionStorage.setItem('sessionId', sessionId);
+  }
+
+  // 调用API
+  const response = await fetch('https://prompt-optimizer.hahazuo460.workers.dev/api/optimize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': userId,
+      'X-Session-Id': sessionId,
+    },
+    body: JSON.stringify({ message })
+  });
+
+  const data = await response.json();
+  return data.data.optimizedPrompt;
+}
+
+// 使用
+optimizePrompt('帮我翻译这段话').then(result => {
+  console.log(result);
+});
 ```
 
 ## 🏗️ 项目结构
 
 ```
-src/mastra/
-├── agents/
-│   └── prompt-optimizer-agent.ts  # Agent 核心逻辑（含详细注释）
-└── index.ts                        # Mastra 配置
-
-test-prompt-optimizer.ts            # 测试脚本
-interactive-test.ts                 # 交互式测试
+zuo-mastra/
+├── src/mastra/
+│   ├── agents/
+│   │   └── prompt-optimizer-agent.ts  # Agent 定义（含详细注释）
+│   └── index.ts                        # Mastra 配置
+├── workers-entry-d1.ts                 # Cloudflare Workers 入口（D1版本）
+├── schema.sql                          # D1 数据库结构
+├── wrangler.toml                       # Cloudflare Workers 配置
+└── README.md                           # 本文件
 ```
 
 ## 🛠️ 技术栈
 
-- **框架**: Mastra（内置前端 + API）
+- **框架**: Mastra
+- **运行环境**: Cloudflare Workers
+- **数据库**: Cloudflare D1 (SQLite)
 - **LLM**: OpenAI GPT-4o-mini
 - **语言**: TypeScript
-- **数据库**: LibSQL
 
-## 💡 使用方式
-
-### 作为独立 API 服务
-
-将 Agent 部署为纯 API，在任何前端项目中调用。
-
-**推荐平台：Vercel**（Mastra 完美兼容）
+## 🔧 本地开发
 
 ```bash
-# 1. 推送代码到 GitHub
-git push origin main
+# 本地运行（使用本地D1数据库）
+wrangler dev
 
-# 2. 访问 vercel.com 导入项目
-# 3. 添加环境变量 OPENAI_API_KEY
-# 4. 部署完成！
-
-# 在前端调用
-fetch('https://your-project.vercel.app/api/agents/promptOptimizerAgent/generate', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    messages: [{ role: 'user', content: '帮我翻译这段话' }]
-  })
-})
+# 查看数据库内容
+wrangler d1 execute prompt-optimizer-db --command="SELECT * FROM conversations LIMIT 10"
 ```
 
-详细说明：[VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md)
+## 💰 成本
 
-**前端示例：**
-- React: `frontend-examples/react-example.tsx`
-- 原生 JS: `frontend-examples/vanilla-js-example.html`
+### Cloudflare Workers 免费额度
+- 每天 10 万次请求
+- 全球 CDN 分发
 
-## 📝 许可
+### Cloudflare D1 免费额度
+- 每天 500 万次读取
+- 每天 10 万次写入
+- 5 GB 存储空间
+
+### OpenAI API
+- GPT-4o-mini: 约 $0.0003-$0.0008 / 次
+- 1000 次优化约 $0.30-$0.80
+
+**对于个人项目完全免费！**
+
+## 📝 配置说明
+
+### 请求头（可选）
+
+| 请求头 | 说明 | 默认值 |
+|--------|------|--------|
+| `X-User-Id` | 用户唯一标识，用于隔离不同用户的数据 | `anonymous` |
+| `X-Session-Id` | 会话ID，用于隔离不同对话 | 自动生成 |
+
+### 对话记忆
+- Agent 会自动读取最近 5 条对话作为上下文
+- 支持多用户、多会话并发
+- 自动清理 30 天前的旧数据
+
+## 🐛 故障排查
+
+### 问题 1：部署后 API 返回 500
+**解决：** 检查 OPENAI_API_KEY 是否正确设置
+```bash
+wrangler secret list
+```
+
+### 问题 2：数据库错误
+**解决：** 确认数据库已初始化
+```bash
+wrangler d1 execute prompt-optimizer-db --file=schema.sql
+```
+
+### 问题 3：无法记住对话
+**解决：** 确保请求中包含 `X-User-Id` 和 `X-Session-Id` 请求头
+
+## 📄 许可
 
 MIT
 
+---
+
+**在线体验：** https://prompt-optimizer.hahazuo460.workers.dev/api/health
