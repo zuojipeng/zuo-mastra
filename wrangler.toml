@@ -1,0 +1,10 @@
+name = "prompt-optimizer"
+main = "workers-entry.ts"
+compatibility_date = "2024-09-23"
+
+# Node.js 兼容性标志
+compatibility_flags = ["nodejs_compat"]
+
+# 环境变量通过 wrangler secret 设置
+# wrangler secret put OPENAI_API_KEY
+
