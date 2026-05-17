@@ -11,6 +11,7 @@
     "outDir": "dist"
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "workers-entry-d1.ts"
   ]
 }

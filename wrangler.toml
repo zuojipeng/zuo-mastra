@@ -11,6 +11,6 @@ binding = "DB"
 database_name = "prompt-optimizer-db"
 database_id = "f02d2d29-2553-4fd9-bb5b-acf29abd6a42"
 
-# 环境变量通过 wrangler secret 设置
-# wrangler secret put OPENAI_API_KEY
+# LLM：DeepSeek（OpenAI 兼容 API）
+# wrangler secret put DEEPSEEK_API_KEY
 

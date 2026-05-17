@@ -1,324 +1,505 @@
 /**
- * ========================================
- * Cloudflare Workers + D1 持久化存储
- * ========================================
- * 
- * 功能：
- * - 使用 D1 (SQLite) 存储对话历史
- * - 自动保存每次对话
- * - 按用户 ID 隔离数据
- * - 支持会话管理
+ * Cloudflare Workers + D1 — AI 视频创作提示词优化 API
  */
 
-import { Agent } from '@mastra/core/agent';
+import { buildPromptInstructions } from './src/mastra/agents/build-prompt-instructions';
+import {
+  buildUserMessage,
+  normalizeScenario,
+  type OptimizeRequestBody,
+} from './src/mastra/agents/build-user-message';
+import { parseOptimizationOutput } from './src/mastra/schemas/optimization-output';
+import {
+  DEEPSEEK_BASE_URL,
+  DEEPSEEK_MODEL_NAME,
+  resolveDeepSeekApiKey,
+} from './src/mastra/llm/model-config';
 
-// 创建 Agent
-const promptOptimizerAgent = new Agent({
-  name: 'Prompt Optimizer Agent',
-  model: 'openai/gpt-4o-mini',
-  instructions: `你是一位专业的 AI 提示词优化专家。你的唯一职责是优化用户的提示词，而不是执行任务本身。
-
-当用户说"帮我翻译这段话"时，你应该：
-1. 分析这个提示词的问题
-2. 提供优化后的翻译提示词
-3. 解释为什么这样优化更好
-
-输出格式：
-📊 原始提示词分析
-✨ 优化后的提示词（版本1和版本2）
-💡 优化要点说明
-🎯 使用建议`,
-  tools: {},
-  scorers: {},
-});
-
-// CORS 配置
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-Session-Id',
-  'Content-Type': 'application/json',
+type D1Db = {
+  prepare(query: string): {
+    bind(...args: unknown[]): {
+      run(): Promise<unknown>;
+      all<T = unknown>(): Promise<{ results?: T[] }>;
+    };
+  };
 };
 
-/**
- * 生成唯一 ID
- */
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+type Env = {
+  DEEPSEEK_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  DB?: D1Db;
+  API_KEY?: string;
+  ALLOWED_ORIGINS?: string;
+  DEBUG_ERRORS?: string;
+};
+
+const DEFAULT_ALLOWED_ORIGINS = new Set([
+  'https://prompt-optimizer-frontend.pages.dev',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+]);
+
+const MAX_BODY_BYTES = 12_000;
+const MAX_MESSAGE_LENGTH = 2_000;
+const MAX_STYLE_LENGTH = 80;
+const MAX_HEADER_ID_LENGTH = 128;
+
+function getAllowedOrigins(env: Env): Set<string> | '*' {
+  if (env.ALLOWED_ORIGINS?.trim() === '*') return '*';
+  const configured = env.ALLOWED_ORIGINS?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (configured?.length) {
+    return new Set(configured);
+  }
+
+  return DEFAULT_ALLOWED_ORIGINS;
 }
 
-/**
- * 保存对话到 D1
- */
+function getCorsHeaders(request: Request, env: Env): HeadersInit {
+  const origin = request.headers.get('Origin');
+  const allowedOrigins = getAllowedOrigins(env);
+  const allowOrigin =
+    allowedOrigins === '*'
+      ? '*'
+      : origin && allowedOrigins.has(origin)
+        ? origin
+        : Array.from(allowedOrigins)[0];
+
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-Session-Id, X-Api-Key',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
+    'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  };
+}
+
+function isOriginAllowed(request: Request, env: Env): boolean {
+  const origin = request.headers.get('Origin');
+  if (!origin) return true;
+  const allowedOrigins = getAllowedOrigins(env);
+  return allowedOrigins === '*' || allowedOrigins.has(origin);
+}
+
+function jsonResponse(body: unknown, status: number, request: Request, env: Env): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: getCorsHeaders(request, env),
+  });
+}
+
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function sanitizeHeaderId(value: string | null, fallback: string): string {
+  if (!value) return fallback;
+  const normalized = value.trim();
+  if (!/^[a-zA-Z0-9._:-]+$/.test(normalized)) return fallback;
+  return normalized.slice(0, MAX_HEADER_ID_LENGTH);
+}
+
+async function readJsonBody(request: Request): Promise<unknown> {
+  const contentType = request.headers.get('Content-Type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new Response(JSON.stringify({ success: false, error: 'Content-Type 必须是 application/json' }), {
+      status: 415,
+    });
+  }
+
+  const contentLength = Number(request.headers.get('Content-Length') ?? '0');
+  if (contentLength > MAX_BODY_BYTES) {
+    throw new Response(JSON.stringify({ success: false, error: '请求体过大' }), { status: 413 });
+  }
+
+  const text = await request.text();
+  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
+    throw new Response(JSON.stringify({ success: false, error: '请求体过大' }), { status: 413 });
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Response(JSON.stringify({ success: false, error: 'JSON 格式无效' }), { status: 400 });
+  }
+}
+
+function normalizeOptimizeBody(raw: unknown): OptimizeRequestBody {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Response(JSON.stringify({ success: false, error: '请求体必须是 JSON 对象' }), { status: 400 });
+  }
+
+  const body = raw as Record<string, unknown>;
+  if (typeof body.message !== 'string' || !body.message.trim()) {
+    throw new Response(
+      JSON.stringify({
+        success: false,
+        error: '请提供有效的 message 字段',
+        example: { message: '雨夜街头，一个女孩回头', scenario: 'video', style: 'wong-kar-wai' },
+      }),
+      { status: 400 },
+    );
+  }
+
+  const message = body.message.trim();
+  if (message.length > MAX_MESSAGE_LENGTH) {
+    throw new Response(JSON.stringify({ success: false, error: `message 不能超过 ${MAX_MESSAGE_LENGTH} 个字符` }), {
+      status: 400,
+    });
+  }
+
+  const style = typeof body.style === 'string' ? body.style.trim().slice(0, MAX_STYLE_LENGTH) : undefined;
+
+  return {
+    message,
+    scenario: normalizeScenario(body.scenario),
+    ...(style ? { style } : {}),
+  };
+}
+
+function getClientIp(request: Request): string {
+  return (
+    request.headers.get('CF-Connecting-IP') ??
+    request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ??
+    'unknown-ip'
+  );
+}
+
+function isDebugEnabled(env: Env): boolean {
+  return env.DEBUG_ERRORS === 'true';
+}
+
 async function saveConversation(
-  db: any,
+  db: D1Db,
   userId: string,
   sessionId: string,
-  messages: any[]
+  messages: { role: string; content: string }[],
 ): Promise<void> {
   const id = generateId();
   const now = Date.now();
-  
-  await db.prepare(`
-    INSERT INTO conversations (id, user_id, session_id, messages, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(
-    id,
-    userId,
-    sessionId,
-    JSON.stringify(messages),
-    now,
-    now
-  ).run();
+  await db
+    .prepare(
+      `INSERT INTO conversations (id, user_id, session_id, messages, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, userId, sessionId, JSON.stringify(messages), now, now)
+    .run();
 }
 
-/**
- * 获取用户的对话历史
- */
 async function getConversationHistory(
-  db: any,
+  db: D1Db,
   userId: string,
   sessionId?: string,
-  limit: number = 10
-): Promise<any[]> {
-  let query: any;
-  
-  if (sessionId) {
-    // 获取特定会话的历史
-    query = db.prepare(`
-      SELECT messages, created_at
-      FROM conversations
-      WHERE user_id = ? AND session_id = ?
-      ORDER BY created_at DESC
-      LIMIT ?
-    `).bind(userId, sessionId, limit);
-  } else {
-    // 获取用户的所有历史
-    query = db.prepare(`
-      SELECT messages, created_at
-      FROM conversations
-      WHERE user_id = ?
-      ORDER BY created_at DESC
-      LIMIT ?
-    `).bind(userId, limit);
-  }
-  
-  const { results } = await query.all();
-  
-  return results.map((row: any) => ({
-    messages: JSON.parse(row.messages),
+  limit = 10,
+): Promise<{ messages: { role: string; content: string }[]; timestamp: number }[]> {
+  const query = sessionId
+    ? db
+        .prepare(
+          `SELECT messages, created_at FROM conversations
+           WHERE user_id = ? AND session_id = ?
+           ORDER BY created_at DESC LIMIT ?`,
+        )
+        .bind(userId, sessionId, limit)
+    : db
+        .prepare(
+          `SELECT messages, created_at FROM conversations
+           WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
+        )
+        .bind(userId, limit);
+
+  const { results } = await query.all<{ messages: string; created_at: number }>();
+  return (results ?? []).map((row: { messages: string; created_at: number }) => ({
+    messages: JSON.parse(row.messages) as { role: string; content: string }[],
     timestamp: row.created_at,
   }));
 }
 
-/**
- * 清理过期数据（超过 30 天）
- */
-async function cleanupOldConversations(db: any): Promise<void> {
-  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-  
-  await db.prepare(`
-    DELETE FROM conversations
-    WHERE created_at < ?
-  `).bind(thirtyDaysAgo).run();
+async function cleanupOldConversations(db: D1Db): Promise<void> {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  await db.prepare(`DELETE FROM conversations WHERE created_at < ?`).bind(thirtyDaysAgo).run();
+}
+
+/** 简易频率限制：每用户每分钟最多 5 次（基于 KV 或内存；Workers 无全局内存时用 D1 可选，此处用请求头+时间窗口缓存模拟） */
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(userId: string, limit = 5, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(userId);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(userId, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= limit) return false;
+  entry.count += 1;
+  return true;
+}
+
+function checkApiKey(request: Request, env: { API_KEY?: string }): boolean {
+  if (!env.API_KEY) return true;
+  const key = request.headers.get('X-Api-Key');
+  return key === env.API_KEY;
+}
+
+let schemaReadyPromise: Promise<void> | undefined;
+
+function ensureConversationSchema(db: D1Db): Promise<void> {
+  schemaReadyPromise ??= (async () => {
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS conversations (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          session_id TEXT,
+          messages TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+      )
+      .bind()
+      .run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_id ON conversations(user_id)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_session_id ON conversations(session_id)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_created_at ON conversations(created_at DESC)`).bind().run();
+  })().catch((error) => {
+    schemaReadyPromise = undefined;
+    throw error;
+  });
+
+  return schemaReadyPromise;
+}
+
+async function callDeepSeekChat(
+  apiKey: string,
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+): Promise<string> {
+  const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL_NAME,
+      messages,
+      temperature: 0,
+      max_tokens: 3200,
+      response_format: { type: 'json_object' },
+    }),
+  });
+
+  const data = (await response.json().catch(() => null)) as
+    | {
+        choices?: { message?: { content?: string } }[];
+        error?: { message?: string };
+      }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? `DeepSeek API error: ${response.status}`);
+  }
+
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('DeepSeek response missing message content');
+  }
+
+  return content;
 }
 
 export default {
-  async fetch(request: Request, env: any): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+  ): Promise<Response> {
     const url = new URL(request.url);
 
-    // 处理 OPTIONS 预检请求
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders,
-      });
+      if (!isOriginAllowed(request, env)) {
+        return jsonResponse({ success: false, error: 'Origin not allowed' }, 403, request, env);
+      }
+      return new Response(null, { status: 204, headers: getCorsHeaders(request, env) });
     }
 
-    // API 端点：POST /api/optimize
+    if (!isOriginAllowed(request, env)) {
+      return jsonResponse({ success: false, error: 'Origin not allowed' }, 403, request, env);
+    }
+
+    if (!checkApiKey(request, env)) {
+      return jsonResponse({ success: false, error: 'Invalid or missing API key' }, 401, request, env);
+    }
+
     if (url.pathname === '/api/optimize' && request.method === 'POST') {
       try {
-        const body = await request.json() as any;
-        const { message } = body;
+        const body = normalizeOptimizeBody(await readJsonBody(request));
+        const { message, scenario, style } = body;
 
-        // 从请求头获取用户 ID 和会话 ID（可选）
-        const userId = request.headers.get('X-User-Id') || 'anonymous';
-        const sessionId = request.headers.get('X-Session-Id') || generateId();
+        const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+        const sessionId = sanitizeHeaderId(request.headers.get('X-Session-Id'), generateId());
+        const rateLimitKey = `${getClientIp(request)}:${userId}`;
 
-        if (!message || typeof message !== 'string') {
-          return new Response(
-            JSON.stringify({
-              error: '请提供有效的 message 字段',
-              example: { message: '帮我翻译这段话' },
-            }),
-            { status: 400, headers: corsHeaders }
+        if (!checkRateLimit(rateLimitKey)) {
+          return jsonResponse(
+            { success: false, error: '请求过于频繁，请稍后再试（每分钟最多 5 次）' },
+            429,
+            request,
+            env,
           );
         }
 
-        // 检查环境变量
-        if (!env.OPENAI_API_KEY) {
-          return new Response(
-            JSON.stringify({ error: 'OPENAI_API_KEY not configured' }),
-            { status: 500, headers: corsHeaders }
-          );
+        const llmApiKey = resolveDeepSeekApiKey(env.DEEPSEEK_API_KEY ?? env.OPENAI_API_KEY);
+        if (!llmApiKey) {
+          return jsonResponse({ success: false, error: '模型服务未配置' }, 500, request, env);
         }
 
-        // 设置 OpenAI API Key
-        process.env.OPENAI_API_KEY = env.OPENAI_API_KEY;
+        process.env.DEEPSEEK_API_KEY = llmApiKey;
 
-        // 获取对话历史（如果有 D1 数据库）
-        let conversationHistory: any[] = [];
+        let conversationHistory: Awaited<ReturnType<typeof getConversationHistory>> = [];
         if (env.DB) {
           try {
-            conversationHistory = await getConversationHistory(
-              env.DB,
-              userId,
-              sessionId,
-              5 // 最近 5 条对话
-            );
+            await ensureConversationSchema(env.DB);
+            conversationHistory = await getConversationHistory(env.DB, userId, sessionId, 5);
           } catch (error) {
             console.error('Failed to fetch history:', error);
-            // 继续处理，即使历史获取失败
           }
         }
 
-        // 构建消息列表（包含历史上下文）
-        const messages: any[] = [];
-        
-        // 添加历史消息（倒序，最旧的在前）
-        conversationHistory.reverse().forEach(history => {
-          messages.push(...history.messages);
-        });
-        
-        // 添加当前消息
-        messages.push({
-          role: 'user',
-          content: message,
+        const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+          { role: 'system', content: buildPromptInstructions(scenario, style) },
+        ];
+
+        [...conversationHistory].reverse().forEach((history) => {
+          history.messages.forEach((m) => {
+            if (m.role === 'user' || m.role === 'assistant') {
+              messages.push({ role: m.role, content: m.content });
+            }
+          });
         });
 
-        // 调用 Agent
-        const response = await promptOptimizerAgent.generate(messages);
+        const userContent = buildUserMessage({ message, scenario, style });
+        messages.push({ role: 'user', content: userContent });
 
-        // 保存对话到 D1
+        const responseText = await callDeepSeekChat(llmApiKey, messages);
+        let structured: ReturnType<typeof parseOptimizationOutput>;
+
+        try {
+          structured = parseOptimizationOutput(responseText);
+        } catch (parseError) {
+          console.error('JSON parse failed, returning raw text:', parseError);
+          return jsonResponse(
+            {
+              success: false,
+              error: '模型返回格式无效，请重试',
+              ...(isDebugEnabled(env) ? { raw: responseText } : {}),
+            },
+            502,
+            request,
+            env,
+          );
+        }
+
         if (env.DB) {
           try {
-            const conversationMessages = [
-              { role: 'user', content: message },
-              { role: 'assistant', content: response.text },
-            ];
-            
-            await saveConversation(
-              env.DB,
-              userId,
-              sessionId,
-              conversationMessages
-            );
-            
-            // 定期清理旧数据（10% 概率执行）
+            await ensureConversationSchema(env.DB);
+            await saveConversation(env.DB, userId, sessionId, [
+              { role: 'user', content: userContent },
+              { role: 'assistant', content: responseText },
+            ]);
             if (Math.random() < 0.1) {
               cleanupOldConversations(env.DB).catch(console.error);
             }
           } catch (error) {
             console.error('Failed to save conversation:', error);
-            // 继续返回结果，即使保存失败
           }
         }
 
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             success: true,
             data: {
               originalPrompt: message,
-              optimizedPrompt: response.text,
-              sessionId: sessionId,
+              scenario,
+              style: style ?? null,
+              result: structured,
+              sessionId,
               hasHistory: conversationHistory.length > 0,
             },
             metadata: {
-              model: 'gpt-4o-mini',
+              model: DEEPSEEK_MODEL_NAME,
               timestamp: new Date().toISOString(),
               historyCount: conversationHistory.length,
             },
-          }),
-          { status: 200, headers: corsHeaders }
+          },
+          200,
+          request,
+          env,
         );
-      } catch (error: any) {
-        console.error('Agent error:', error);
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: error.message || '服务器内部错误',
-          }),
-          { status: 500, headers: corsHeaders }
-        );
+      } catch (error: unknown) {
+        if (error instanceof Response) {
+          return new Response(error.body, {
+            status: error.status,
+            headers: getCorsHeaders(request, env),
+          });
+        }
+        const err = error as Error;
+        console.error('Agent error:', err);
+        return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
       }
     }
 
-    // API 端点：GET /api/history（获取历史记录）
     if (url.pathname === '/api/history' && request.method === 'GET') {
       try {
-        const userId = request.headers.get('X-User-Id') || 'anonymous';
-        const sessionId = request.headers.get('X-Session-Id') || undefined;
-        
+        const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+        const rawSessionId = request.headers.get('X-Session-Id');
+        const sessionId = rawSessionId ? sanitizeHeaderId(rawSessionId, '') : undefined;
+
         if (!env.DB) {
-          return new Response(
-            JSON.stringify({ error: 'Database not configured' }),
-            { status: 500, headers: corsHeaders }
-          );
+          return jsonResponse({ success: false, error: 'Database not configured' }, 500, request, env);
         }
-        
-        const history = await getConversationHistory(
-          env.DB,
-          userId,
-          sessionId,
-          20 // 最近 20 条
-        );
-        
-        return new Response(
-          JSON.stringify({
+
+        await ensureConversationSchema(env.DB);
+        const history = await getConversationHistory(env.DB, userId, sessionId, 20);
+
+        return jsonResponse(
+          {
             success: true,
-            data: {
-              userId,
-              sessionId,
-              history,
-              count: history.length,
-            },
-          }),
-          { status: 200, headers: corsHeaders }
+            data: { userId, sessionId, history, count: history.length },
+          },
+          200,
+          request,
+          env,
         );
-      } catch (error: any) {
-        console.error('History error:', error);
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: error.message,
-          }),
-          { status: 500, headers: corsHeaders }
-        );
+      } catch (error: unknown) {
+        const err = error as Error;
+        console.error('History error:', err);
+        return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
       }
     }
 
-    // 健康检查
     if (url.pathname === '/api/health' && request.method === 'GET') {
       const hasDb = !!env.DB;
-      
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           status: 'ok',
-          service: 'Prompt Optimizer Agent (Workers + D1)',
+          service: 'AI Video Prompt Optimizer (Workers + D1)',
+          focus: 'video',
           features: {
             memory: hasDb,
             database: hasDb ? 'D1 (SQLite)' : 'none',
+            structuredOutput: true,
+            scenarios: ['video', 'image', 'code'],
           },
-        }),
-        { status: 200, headers: corsHeaders }
+        },
+        200,
+        request,
+        env,
       );
     }
 
-    // 404
-    return new Response(
-      JSON.stringify({ error: 'Not found' }),
-      { status: 404, headers: corsHeaders }
-    );
+    return jsonResponse({ success: false, error: 'Not found' }, 404, request, env);
   },
 };
-
