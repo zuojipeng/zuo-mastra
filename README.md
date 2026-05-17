@@ -1,295 +1,147 @@
-# 🎯 AI 提示词优化 Agent
+# AI 视频分镜 Prompt 服务
 
-基于 Mastra 框架开发的智能提示词优化助手，部署在 Cloudflare Workers + D1，支持对话记忆。
+这是 AI 视频分镜 Prompt 工作台的服务端。它把一句视频创意扩写成结构化的 15 秒分镜、完整 positive prompt、negative prompt、平台适配版本和后续优化建议。
 
-## ✨ 功能
+## 功能
 
-- 📊 分析原始提示词的问题
-- ✨ 生成优化后的多个版本
-- 💡 提供详细的改进建议
-- 🧠 支持对话记忆（D1 持久化存储）
-- 🌍 全球 CDN 部署（Cloudflare Workers）
+- 分析原始视频创意的问题和改进方向
+- 生成 15 秒分镜时间轴
+- 生成完整英文 positive prompt
+- 生成视频负向提示词
+- 输出 Kling、Runway、Pika、Sora、Seedance 平台适配版本
+- 支持基于用户和会话的历史上下文
 
-## 🚀 快速部署
-
-### 1. 克隆项目
+## 本地开发
 
 ```bash
-git clone https://github.com/zuojipeng/zuo-mastra.git
-cd zuo-mastra
 npm install
+npm run check
 ```
 
-### 2. 初始化数据库
+本地服务运行和部署命令依赖当前环境配置。运行前需要配置模型 API key 和数据库绑定。
 
-```bash
-# 数据库已创建，直接初始化表结构
-wrangler d1 execute prompt-optimizer-db --file=schema.sql
+## API
+
+### `POST /api/optimize`
+
+请求：
+
+```json
+{
+  "message": "雨夜街头，一个女孩停在霓虹招牌下，听见身后脚步声后缓慢回头",
+  "scenario": "video",
+  "style": "wong-kar-wai"
+}
 ```
 
-### 3. 配置 API Key
+请求头：
 
-```bash
-wrangler secret put OPENAI_API_KEY
-# 输入你的 OpenAI API Key
-```
+| Header | Required | Notes |
+| --- | --- | --- |
+| `Content-Type: application/json` | Yes | JSON request body |
+| `X-User-Id` | No | 用于隔离用户历史 |
+| `X-Session-Id` | No | 用于隔离会话历史 |
+| `X-Api-Key` | No | 仅在服务端启用 API key 时需要 |
 
-### 4. 部署
-
-```bash
-wrangler deploy
-```
-
-完成！🎉
-
-## 📡 API 使用
-
-### 端点 1：优化提示词
-
-```bash
-POST https://prompt-optimizer.hahazuo460.workers.dev/api/optimize
-```
-
-**请求示例：**
-
-```javascript
-const response = await fetch('https://prompt-optimizer.hahazuo460.workers.dev/api/optimize', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-User-Id': 'user123',      // 可选：用户ID，启用记忆功能
-    'X-Session-Id': 'session456' // 可选：会话ID，隔离不同对话
-  },
-  body: JSON.stringify({
-    message: '帮我翻译这段话'
-  })
-});
-
-const data = await response.json();
-console.log(data.data.optimizedPrompt);
-```
-
-**响应示例：**
+响应：
 
 ```json
 {
   "success": true,
   "data": {
-    "originalPrompt": "帮我翻译这段话",
-    "optimizedPrompt": "📊 原始提示词分析\n...",
-    "sessionId": "session456",
-    "hasHistory": true
+    "originalPrompt": "雨夜街头，一个女孩停在霓虹招牌下，听见身后脚步声后缓慢回头",
+    "scenario": "video",
+    "style": "wong-kar-wai",
+    "result": {
+      "analysis": "原始创意的分析...",
+      "timeline": [
+        {
+          "time": "0-3s",
+          "shot": "Wide shot...",
+          "action": "角色动作...",
+          "expression": "表情变化...",
+          "audio": "声音设计..."
+        }
+      ],
+      "full_prompt": "15-second cinematic video...",
+      "negative_prompt": "bad anatomy, flickering, watermark...",
+      "versions": [
+        {
+          "style": "15秒分镜版",
+          "positive_prompt": "15-second cinematic video...",
+          "negative_prompt": "bad anatomy, flickering, watermark...",
+          "reasoning": "版本设计理由..."
+        }
+      ],
+      "platform_variants": [
+        {
+          "platform": "Kling",
+          "prompt": "Kling-optimized English prompt...",
+          "usage_notes": "使用建议...",
+          "constraint_notes": "限制提醒..."
+        }
+      ],
+      "suggestions": ["可进一步尝试的优化建议"]
+    },
+    "sessionId": "session-id",
+    "hasHistory": false
   },
   "metadata": {
-    "model": "gpt-4o-mini",
-    "timestamp": "2025-11-11T14:56:13.420Z",
-    "historyCount": 3
+    "model": "deepseek-chat",
+    "timestamp": "2026-05-18T00:00:00.000Z",
+    "historyCount": 0
   }
 }
 ```
 
-### 端点 2：查看历史记录
+### `GET /api/history`
 
-```bash
-GET https://prompt-optimizer.hahazuo460.workers.dev/api/history
-```
+按 `X-User-Id` 和可选 `X-Session-Id` 返回最近历史记录。
 
-**请求示例：**
+### `GET /api/health`
 
-```javascript
-const response = await fetch('https://prompt-optimizer.hahazuo460.workers.dev/api/history', {
-  headers: {
-    'X-User-Id': 'user123',
-    'X-Session-Id': 'session456'
-  }
-});
+返回服务健康状态、记忆能力和当前功能开关。
 
-const data = await response.json();
-console.log(data.data.history);
-```
+## 项目结构
 
-### 端点 3：健康检查
-
-```bash
-GET https://prompt-optimizer.hahazuo460.workers.dev/api/health
-```
-
-## 💻 前端集成示例
-
-### React 示例
-
-```tsx
-import { useState } from 'react';
-
-const API_URL = 'https://prompt-optimizer.hahazuo460.workers.dev/api/optimize';
-
-export default function PromptOptimizer() {
-  const [input, setInput] = useState('');
-  const [result, setResult] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  // 生成或获取用户ID
-  const userId = localStorage.getItem('userId') || `user-${Date.now()}`;
-  const sessionId = sessionStorage.getItem('sessionId') || `session-${Date.now()}`;
-
-  const handleOptimize = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Id': userId,
-          'X-Session-Id': sessionId,
-        },
-        body: JSON.stringify({ message: input })
-      });
-
-      const data = await response.json();
-      setResult(data.data.optimizedPrompt);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div>
-      <textarea 
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="输入要优化的提示词"
-      />
-      <button onClick={handleOptimize} disabled={loading}>
-        {loading ? '优化中...' : '优化提示词'}
-      </button>
-      {result && <pre>{result}</pre>}
-    </div>
-  );
-}
-```
-
-### 原生 JavaScript 示例
-
-```javascript
-async function optimizePrompt(message) {
-  // 生成或获取用户ID和会话ID
-  let userId = localStorage.getItem('userId');
-  if (!userId) {
-    userId = `user-${Date.now()}`;
-    localStorage.setItem('userId', userId);
-  }
-
-  let sessionId = sessionStorage.getItem('sessionId');
-  if (!sessionId) {
-    sessionId = `session-${Date.now()}`;
-    sessionStorage.setItem('sessionId', sessionId);
-  }
-
-  // 调用API
-  const response = await fetch('https://prompt-optimizer.hahazuo460.workers.dev/api/optimize', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': userId,
-      'X-Session-Id': sessionId,
-    },
-    body: JSON.stringify({ message })
-  });
-
-  const data = await response.json();
-  return data.data.optimizedPrompt;
-}
-
-// 使用
-optimizePrompt('帮我翻译这段话').then(result => {
-  console.log(result);
-});
-```
-
-## 🏗️ 项目结构
-
-```
-zuo-mastra/
+```text
+.
+├── docs/
+│   └── product-delivery-ddo-2026.md
 ├── src/mastra/
 │   ├── agents/
-│   │   └── prompt-optimizer-agent.ts  # Agent 定义（含详细注释）
-│   └── index.ts                        # Mastra 配置
-├── workers-entry-d1.ts                 # Cloudflare Workers 入口（D1版本）
-├── schema.sql                          # D1 数据库结构
-├── wrangler.toml                       # Cloudflare Workers 配置
-└── README.md                           # 本文件
+│   │   ├── build-prompt-instructions.ts
+│   │   ├── build-user-message.ts
+│   │   └── video-prompt-knowledge.ts
+│   ├── llm/
+│   │   └── model-config.ts
+│   └── schemas/
+│       └── optimization-output.ts
+├── workers-entry-d1.ts
+├── schema.sql
+├── wrangler.toml
+└── package.json
 ```
 
-## 🛠️ 技术栈
-
-- **框架**: Mastra
-- **运行环境**: Cloudflare Workers
-- **数据库**: Cloudflare D1 (SQLite)
-- **LLM**: OpenAI GPT-4o-mini
-- **语言**: TypeScript
-
-## 🔧 本地开发
+## 质量门槛
 
 ```bash
-# 本地运行（使用本地D1数据库）
-wrangler dev
-
-# 查看数据库内容
-wrangler d1 execute prompt-optimizer-db --command="SELECT * FROM conversations LIMIT 10"
+npm run check
 ```
 
-## 💰 成本
+每次上线前至少确认：
 
-### Cloudflare Workers 免费额度
-- 每天 10 万次请求
-- 全球 CDN 分发
+- TypeScript check 通过
+- `/api/health` 返回成功
+- `/api/optimize` 能返回 `result.platform_variants`
+- 前端可以渲染时间轴、主 prompt、负向词和平台版本
 
-### Cloudflare D1 免费额度
-- 每天 500 万次读取
-- 每天 10 万次写入
-- 5 GB 存储空间
+## 配置项
 
-### OpenAI API
-- GPT-4o-mini: 约 $0.0003-$0.0008 / 次
-- 1000 次优化约 $0.30-$0.80
-
-**对于个人项目完全免费！**
-
-## 📝 配置说明
-
-### 请求头（可选）
-
-| 请求头 | 说明 | 默认值 |
-|--------|------|--------|
-| `X-User-Id` | 用户唯一标识，用于隔离不同用户的数据 | `anonymous` |
-| `X-Session-Id` | 会话ID，用于隔离不同对话 | 自动生成 |
-
-### 对话记忆
-- Agent 会自动读取最近 5 条对话作为上下文
-- 支持多用户、多会话并发
-- 自动清理 30 天前的旧数据
-
-## 🐛 故障排查
-
-### 问题 1：部署后 API 返回 500
-**解决：** 检查 OPENAI_API_KEY 是否正确设置
-```bash
-wrangler secret list
-```
-
-### 问题 2：数据库错误
-**解决：** 确认数据库已初始化
-```bash
-wrangler d1 execute prompt-optimizer-db --file=schema.sql
-```
-
-### 问题 3：无法记住对话
-**解决：** 确保请求中包含 `X-User-Id` 和 `X-Session-Id` 请求头
-
-## 📄 许可
-
-MIT
-
----
-
-**在线体验：** https://prompt-optimizer.hahazuo460.workers.dev/api/health
+| Name | Notes |
+| --- | --- |
+| `DEEPSEEK_API_KEY` | 模型调用 key |
+| `DB` | 历史记录数据库绑定 |
+| `ALLOWED_ORIGINS` | 允许访问 API 的前端 origin，逗号分隔 |
+| `API_KEY` | 可选的服务访问 key |
+| `DEBUG_ERRORS` | 设为 `true` 时返回更多调试信息 |

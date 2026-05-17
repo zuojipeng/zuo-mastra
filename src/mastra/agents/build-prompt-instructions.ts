@@ -81,6 +81,7 @@ ${negativePromptRule}
 3. 每段必须写清：景别/机位/镜头运动/转场、人物动作、人物表情、环境变化、声音或台词
 4. full_prompt 使用英文为主，适合直接复制到 Runway、Kling、Pika、Sora 等视频工具
 5. 中文字段用于解释和分镜描述，避免空洞形容词堆砌；每个镜头词都要服务画面
+6. platform_variants 必须针对平台差异重写，不允许把 full_prompt 简单复制 5 遍
 
 ## 输出格式（硬性要求）
 **仅输出一个合法 JSON 对象**，不要 Markdown 标题、不要 \`\`\`json 代码块、不要前后废话。
@@ -94,6 +95,7 @@ ${OPTIMIZATION_OUTPUT_JSON_EXAMPLE}
 - full_prompt：字符串，完整 15 秒英文视频提示词，必须包含时长、镜头、动作、转场、光影、风格、画面质感
 - negative_prompt：字符串，完整负向提示词，排除闪烁、畸形、塑料感、水印、文字、低清、动作不自然等
 - versions：数组，至少 1 项；用于兼容旧前端。默认输出 1 项「15秒分镜版」，positive_prompt 与 full_prompt 一致或更紧凑，negative_prompt 与顶层 negative_prompt 一致
+- platform_variants：数组，必须包含 Kling、Runway、Pika、Sora、Seedance 五个平台；每项含 platform、prompt、usage_notes、constraint_notes
 - suggestions：字符串数组，2–4 条可操作建议
 `;
 }

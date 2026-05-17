@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "workers-entry-d1.ts",
+    "src/mastra/agents/build-prompt-instructions.ts",
+    "src/mastra/agents/build-user-message.ts",
+    "src/mastra/agents/video-prompt-knowledge.ts",
+    "src/mastra/llm/model-config.ts",
+    "src/mastra/schemas/optimization-output.ts"
+  ]
+}

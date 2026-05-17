@@ -485,13 +485,14 @@ export default {
       return jsonResponse(
         {
           status: 'ok',
-          service: 'AI Video Prompt Optimizer (Workers + D1)',
+          service: 'AI Video Prompt Workbench',
           focus: 'video',
           features: {
             memory: hasDb,
             database: hasDb ? 'D1 (SQLite)' : 'none',
             structuredOutput: true,
-            scenarios: ['video', 'image', 'code'],
+            scenarios: ['video'],
+            platformVariants: ['Kling', 'Runway', 'Pika', 'Sora', 'Seedance'],
           },
         },
         200,

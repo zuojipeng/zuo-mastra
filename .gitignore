@@ -7,3 +7,5 @@ dist
 .dev.vars
 *.db
 *.db-*
+.wrangler/
+docs/product-delivery-ddo-2026.md

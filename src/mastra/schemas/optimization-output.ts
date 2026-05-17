@@ -7,6 +7,13 @@ export const promptVersionSchema = z.object({
   reasoning: z.string().describe('本版本采用的镜头/光影/运动等设计理由'),
 });
 
+export const platformVariantSchema = z.object({
+  platform: z.enum(['Kling', 'Runway', 'Pika', 'Sora', 'Seedance']).describe('目标视频生成平台'),
+  prompt: z.string().describe('针对该平台可直接复制的英文 prompt'),
+  usage_notes: z.string().describe('该平台使用建议，如时长、运动强度、镜头描述重点'),
+  constraint_notes: z.string().describe('该平台常见限制或需要避免的问题'),
+});
+
 export const timelineSegmentSchema = z.object({
   time: z.string().describe('时间段，如 0-3s'),
   shot: z.string().describe('景别、机位、镜头运动与转场设计'),
@@ -28,6 +35,10 @@ export const optimizationOutputSchema = z.object({
     .min(1)
     .max(3)
     .describe('兼容旧前端的版本列表；默认至少 1 项，positive_prompt 应与 full_prompt 一致'),
+  platform_variants: z
+    .array(platformVariantSchema)
+    .min(5)
+    .describe('针对主流 AI 视频平台的可复制版本，必须包含 Kling、Runway、Pika、Sora、Seedance'),
   suggestions: z.array(z.string()).min(1).describe('可进一步尝试的优化建议'),
 });
 
@@ -80,6 +91,38 @@ export const OPTIMIZATION_OUTPUT_JSON_EXAMPLE = `{
       "positive_prompt": "与 full_prompt 内容一致或更紧凑的可复制提示词",
       "negative_prompt": "与 negative_prompt 内容一致",
       "reasoning": "说明如何通过时间轴、镜头、动作和声音增强可生成性"
+    }
+  ],
+  "platform_variants": [
+    {
+      "platform": "Kling",
+      "prompt": "Kling-optimized English prompt with clear subject consistency, camera movement, action beats, lighting, and duration.",
+      "usage_notes": "Use concise motion verbs, keep the subject consistent, and avoid overloading the scene with too many events.",
+      "constraint_notes": "Avoid conflicting camera moves, excessive character count, and vague style-only descriptions."
+    },
+    {
+      "platform": "Runway",
+      "prompt": "Runway-optimized English prompt emphasizing cinematic camera language, scene continuity, lighting, and temporal progression.",
+      "usage_notes": "Prioritize shot type, camera motion, visual mood, and a clean action arc.",
+      "constraint_notes": "Avoid rapid scene changes, dense plot beats, and unclear subject references."
+    },
+    {
+      "platform": "Pika",
+      "prompt": "Pika-optimized English prompt with compact scene setup, visible action, expressive emotion, and stylized motion.",
+      "usage_notes": "Keep the prompt punchy and visual; emphasize one primary motion and one emotional beat.",
+      "constraint_notes": "Avoid long multi-character choreography and tiny background details."
+    },
+    {
+      "platform": "Sora",
+      "prompt": "Sora-optimized English prompt describing a coherent 15-second scene with rich spatial detail, physics, and continuity.",
+      "usage_notes": "Use detailed temporal progression, environment interactions, and realistic physical cause and effect.",
+      "constraint_notes": "Avoid impossible spatial transitions and contradictory lighting or lens instructions."
+    },
+    {
+      "platform": "Seedance",
+      "prompt": "Seedance-optimized English prompt with strong rhythm, stylized motion, character expression, and short-form video clarity.",
+      "usage_notes": "Emphasize pacing, expressive movement, mood, and an instantly readable composition.",
+      "constraint_notes": "Avoid slow ambiguous setups and overloaded narrative context."
     }
   ],
   "suggestions": ["尝试加入...", "可补充运动描述..."]
