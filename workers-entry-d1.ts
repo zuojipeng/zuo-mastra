@@ -35,6 +35,7 @@ type Env = {
 
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   'https://prompt-optimizer-frontend.pages.dev',
+  'https://prompt-mastra-agent-ui.pages.dev',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
 ]);
@@ -69,13 +70,29 @@ function getAllowedOrigins(env: Env): Set<string> | '*' {
   return DEFAULT_ALLOWED_ORIGINS;
 }
 
+function isAllowedPagesPreviewOrigin(origin: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return (
+      protocol === 'https:' &&
+      (hostname === 'prompt-mastra-agent-ui.pages.dev' || hostname.endsWith('.prompt-mastra-agent-ui.pages.dev'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedOrigin(origin: string, allowedOrigins: Set<string> | '*'): boolean {
+  return allowedOrigins === '*' || allowedOrigins.has(origin) || isAllowedPagesPreviewOrigin(origin);
+}
+
 function getCorsHeaders(request: Request, env: Env): HeadersInit {
   const origin = request.headers.get('Origin');
   const allowedOrigins = getAllowedOrigins(env);
   const allowOrigin =
     allowedOrigins === '*'
       ? '*'
-      : origin && allowedOrigins.has(origin)
+      : origin && isAllowedOrigin(origin, allowedOrigins)
         ? origin
         : Array.from(allowedOrigins)[0];
 
@@ -95,7 +112,7 @@ function isOriginAllowed(request: Request, env: Env): boolean {
   const origin = request.headers.get('Origin');
   if (!origin) return true;
   const allowedOrigins = getAllowedOrigins(env);
-  return allowedOrigins === '*' || allowedOrigins.has(origin);
+  return isAllowedOrigin(origin, allowedOrigins);
 }
 
 function jsonResponse(body: unknown, status: number, request: Request, env: Env): Response {
@@ -445,7 +462,7 @@ async function callDeepSeekChat(
       model: DEEPSEEK_MODEL_NAME,
       messages,
       temperature: 0,
-      max_tokens: 3200,
+      max_tokens: 5000,
       response_format: { type: 'json_object' },
     }),
   });
