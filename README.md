@@ -49,6 +49,26 @@ npm run check
 }
 ```
 
+高级导演模式请求：
+
+```json
+{
+  "message": "一个清洁机器人在废土小镇执行最后一次清扫任务",
+  "scenario": "video",
+  "projectBible": {
+    "protagonist": "复古清洁机器人，牛仔帽，旧金属外壳，动作迟缓但执着",
+    "mission": "每天清理废弃小镇，并保护一个红裙人偶",
+    "world": "原子朋克废土小镇，慢速丧尸游荡，旧广告牌闪烁",
+    "visualSymbols": ["机械鸵鸟", "红裙人偶", "破旧清扫车"],
+    "lookAndFeel": "atompunk, retro-futurism, dusty orange light, handcrafted miniature feel",
+    "continuityRules": ["主角外观不漂移", "视觉符号重复出现", "每镜头只做一件事"],
+    "shotIntent": "建立世界、展示职业、制造反差萌、推进关系、留下悬念"
+  }
+}
+```
+
+开启高级导演模式时，结构化结果会额外返回 `continuity_plan`，用于锁定主角、固定视觉符号、世界规则和每段镜头目的。
+
 `refinement.targetType` 可选值：
 
 - `full_prompt`

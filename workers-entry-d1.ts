@@ -8,7 +8,7 @@ import {
   normalizeScenario,
   type OptimizeRequestBody,
 } from './src/mastra/agents/build-user-message';
-import { parseOptimizationOutput } from './src/mastra/schemas/optimization-output';
+import { parseOptimizationOutput, type OptimizationOutput } from './src/mastra/schemas/optimization-output';
 import {
   DEEPSEEK_BASE_URL,
   DEEPSEEK_MODEL_NAME,
@@ -45,6 +45,8 @@ const MAX_STYLE_LENGTH = 80;
 const MAX_REFINEMENT_CONTENT_LENGTH = 4_000;
 const MAX_REFINEMENT_LABEL_LENGTH = 120;
 const MAX_REFINEMENT_INSTRUCTION_LENGTH = 400;
+const MAX_PROJECT_BIBLE_FIELD_LENGTH = 500;
+const MAX_PROJECT_BIBLE_ARRAY_ITEMS = 5;
 const MAX_HEADER_ID_LENGTH = 128;
 const VALID_REFINEMENT_TARGETS = new Set([
   'full_prompt',
@@ -164,7 +166,45 @@ function normalizeOptimizeBody(raw: unknown): OptimizeRequestBody {
   }
 
   const style = typeof body.style === 'string' ? body.style.trim().slice(0, MAX_STYLE_LENGTH) : undefined;
+  let projectBible: OptimizeRequestBody['projectBible'];
   let refinement: OptimizeRequestBody['refinement'];
+
+  if (body.projectBible !== undefined) {
+    if (!body.projectBible || typeof body.projectBible !== 'object' || Array.isArray(body.projectBible)) {
+      throw new Response(JSON.stringify({ success: false, error: 'projectBible 必须是 JSON 对象' }), { status: 400 });
+    }
+
+    const rawProjectBible = body.projectBible as Record<string, unknown>;
+    const readText = (key: string): string | undefined => {
+      const value = rawProjectBible[key];
+      return typeof value === 'string' && value.trim()
+        ? value.trim().slice(0, MAX_PROJECT_BIBLE_FIELD_LENGTH)
+        : undefined;
+    };
+    const readList = (key: string): string[] | undefined => {
+      const value = rawProjectBible[key];
+      if (!Array.isArray(value)) return undefined;
+      const items = value
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim().slice(0, MAX_PROJECT_BIBLE_FIELD_LENGTH))
+        .slice(0, MAX_PROJECT_BIBLE_ARRAY_ITEMS);
+      return items.length ? items : undefined;
+    };
+
+    const normalizedProjectBible = {
+      protagonist: readText('protagonist'),
+      mission: readText('mission'),
+      world: readText('world'),
+      visualSymbols: readList('visualSymbols'),
+      lookAndFeel: readText('lookAndFeel'),
+      continuityRules: readList('continuityRules'),
+      shotIntent: readText('shotIntent'),
+    };
+
+    if (Object.values(normalizedProjectBible).some((value) => value !== undefined)) {
+      projectBible = normalizedProjectBible;
+    }
+  }
 
   if (body.refinement !== undefined) {
     if (!body.refinement || typeof body.refinement !== 'object' || Array.isArray(body.refinement)) {
@@ -207,6 +247,7 @@ function normalizeOptimizeBody(raw: unknown): OptimizeRequestBody {
     message,
     scenario: normalizeScenario(body.scenario),
     ...(style ? { style } : {}),
+    ...(projectBible ? { projectBible } : {}),
     ...(refinement ? { refinement } : {}),
   };
 }
@@ -221,6 +262,74 @@ function getClientIp(request: Request): string {
 
 function isDebugEnabled(env: Env): boolean {
   return env.DEBUG_ERRORS === 'true';
+}
+
+function includesText(haystack: string, needle: string): boolean {
+  return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+function enforceProjectBibleContinuity(
+  output: OptimizationOutput,
+  projectBible: OptimizeRequestBody['projectBible'],
+): OptimizationOutput {
+  if (!projectBible) {
+    return output;
+  }
+
+  const symbols = projectBible.visualSymbols?.filter(Boolean).slice(0, MAX_PROJECT_BIBLE_ARRAY_ITEMS) ?? [];
+  const recurringSymbols = Array.from(new Set([...symbols, ...output.continuity_plan.recurring_visual_symbols]));
+  const protagonistLock = [projectBible.protagonist, output.continuity_plan.protagonist_lock]
+    .filter((value): value is string => Boolean(value))
+    .join('；');
+  const worldRules = Array.from(
+    new Set(
+      [
+        projectBible.world,
+        projectBible.lookAndFeel ? `统一视觉风格：${projectBible.lookAndFeel}` : undefined,
+        ...(projectBible.continuityRules ?? []),
+        ...output.continuity_plan.world_rules,
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
+
+  const timelineText = JSON.stringify(output.timeline);
+  symbols.forEach((symbol, index) => {
+    if (!includesText(timelineText, symbol)) {
+      const target = output.timeline[index % output.timeline.length];
+      target.action = `${target.action} 固定视觉符号：${symbol}保持可见。`;
+    }
+  });
+
+  const requiredSymbolText = symbols.length ? ` Recurring visual symbols: ${symbols.join(', ')}.` : '';
+  const fullPrompt =
+    symbols.length && !symbols.every((symbol) => includesText(output.full_prompt, symbol))
+      ? `${output.full_prompt}${requiredSymbolText}`
+      : output.full_prompt;
+
+  return {
+    ...output,
+    continuity_plan: {
+      protagonist_lock: protagonistLock || output.continuity_plan.protagonist_lock,
+      recurring_visual_symbols: recurringSymbols.length ? recurringSymbols : output.continuity_plan.recurring_visual_symbols,
+      world_rules: worldRules.length ? worldRules : output.continuity_plan.world_rules,
+      shot_intents: output.continuity_plan.shot_intents,
+    },
+    full_prompt: fullPrompt,
+    versions: output.versions.map((version) => ({
+      ...version,
+      positive_prompt:
+        symbols.length && !symbols.every((symbol) => includesText(version.positive_prompt, symbol))
+          ? `${version.positive_prompt}${requiredSymbolText}`
+          : version.positive_prompt,
+    })),
+    platform_variants: output.platform_variants.map((variant) => ({
+      ...variant,
+      prompt:
+        symbols.length && !symbols.every((symbol) => includesText(variant.prompt, symbol))
+          ? `${variant.prompt}${requiredSymbolText}`
+          : variant.prompt,
+    })),
+  };
 }
 
 async function saveConversation(
@@ -385,7 +494,7 @@ export default {
     if (url.pathname === '/api/optimize' && request.method === 'POST') {
       try {
         const body = normalizeOptimizeBody(await readJsonBody(request));
-        const { message, scenario, style } = body;
+        const { message, scenario, style, projectBible } = body;
 
         const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
         const sessionId = sanitizeHeaderId(request.headers.get('X-Session-Id'), generateId());
@@ -429,7 +538,7 @@ export default {
           });
         });
 
-        const userContent = buildUserMessage({ message, scenario, style });
+        const userContent = buildUserMessage({ message, scenario, style, projectBible });
         messages.push({ role: 'user', content: userContent });
 
         const responseText = await callDeepSeekChat(llmApiKey, messages);
@@ -451,12 +560,15 @@ export default {
           );
         }
 
+        structured = enforceProjectBibleContinuity(structured, projectBible);
+        const structuredResponseText = JSON.stringify(structured);
+
         if (env.DB) {
           try {
             await ensureConversationSchema(env.DB);
             await saveConversation(env.DB, userId, sessionId, [
               { role: 'user', content: userContent },
-              { role: 'assistant', content: responseText },
+              { role: 'assistant', content: structuredResponseText },
             ]);
             if (Math.random() < 0.1) {
               cleanupOldConversations(env.DB).catch(console.error);

@@ -4,6 +4,15 @@ export type OptimizeRequestBody = {
   message: string;
   scenario?: OptimizationScenario;
   style?: string;
+  projectBible?: {
+    protagonist?: string;
+    mission?: string;
+    world?: string;
+    visualSymbols?: string[];
+    lookAndFeel?: string;
+    continuityRules?: string[];
+    shotIntent?: string;
+  };
   refinement?: {
     targetType: 'full_prompt' | 'negative_prompt' | 'timeline_segment' | 'platform_variant' | 'version';
     label: string;
@@ -28,6 +37,36 @@ export function buildUserMessage(body: OptimizeRequestBody): string {
   }
   if (body.style) {
     parts.push(`[风格偏好: ${body.style}]`);
+  }
+  if (body.projectBible) {
+    parts.push('高级导演模式：请把下面的作品设定作为整支短片的统一审美和连续性约束。');
+    if (body.projectBible.protagonist) {
+      parts.push(`主角设定：${body.projectBible.protagonist}`);
+    }
+    if (body.projectBible.mission) {
+      parts.push(`角色任务：${body.projectBible.mission}`);
+    }
+    if (body.projectBible.world) {
+      parts.push(`世界观：${body.projectBible.world}`);
+    }
+    if (body.projectBible.visualSymbols?.length) {
+      parts.push(`固定视觉符号：${body.projectBible.visualSymbols.join('、')}`);
+      parts.push(
+        '硬性要求：continuity_plan.recurring_visual_symbols 必须优先列出这些固定视觉符号；至少两个固定视觉符号必须出现在 timeline 和 full_prompt 中，并在多个镜头中重复出现。',
+      );
+    }
+    if (body.projectBible.lookAndFeel) {
+      parts.push(`统一视觉风格：${body.projectBible.lookAndFeel}`);
+    }
+    if (body.projectBible.continuityRules?.length) {
+      parts.push(`连续性规则：${body.projectBible.continuityRules.join('；')}`);
+    }
+    if (body.projectBible.shotIntent) {
+      parts.push(`每个镜头的单一目的：${body.projectBible.shotIntent}`);
+    }
+    parts.push(
+      '输出时必须让 timeline、full_prompt、versions、platform_variants 反复体现这些作品设定；不要把每个镜头写成互不相关的酷元素合集。',
+    );
   }
   if (body.refinement) {
     parts.push(`请对「${body.refinement.label}」进行局部继续优化。`);

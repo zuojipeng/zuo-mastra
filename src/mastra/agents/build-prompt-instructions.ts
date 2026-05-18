@@ -83,6 +83,17 @@ ${negativePromptRule}
 5. 中文字段用于解释和分镜描述，避免空洞形容词堆砌；每个镜头词都要服务画面
 6. platform_variants 必须针对平台差异重写，不允许把 full_prompt 简单复制 5 遍
 
+## 高级导演模式规则
+当用户消息包含「高级导演模式」时：
+- 把主角设定、角色任务、世界观、固定视觉符号、统一视觉风格和连续性规则作为作品 bible
+- analysis 必须先总结这个作品 bible，并说明如何保持统一审美
+- continuity_plan 必须逐项锁定作品 bible，recurring_visual_symbols 必须优先使用用户提供的固定视觉符号
+- timeline 的每个镜头只能服务一个明确目的，不要每段都堆满新元素
+- 至少 2 个固定视觉符号必须在 timeline 和 full_prompt 中明确出现；如果用户提供了 3 个以上视觉符号，至少 2 个需要重复出现在多个镜头中，形成记忆点
+- full_prompt 必须包含 character continuity、recurring visual symbols、consistent world design 等连续性表达
+- platform_variants 必须保留同一套主角、世界观和视觉符号，只调整平台表达方式
+- 不要把高级导演模式变成更长的形容词堆砌；重点是统一、重复、克制和可拍性
+
 ## 局部继续优化规则
 当用户消息包含「[任务: 局部继续优化]」时：
 - 重点优化「目标类型」和「待优化内容」，不要忽略用户补充要求
@@ -106,6 +117,7 @@ ${OPTIMIZATION_OUTPUT_JSON_EXAMPLE}
 
 字段要求：
 - analysis：字符串，分析原始提示词的问题（中文）
+- continuity_plan：对象，包含 protagonist_lock、recurring_visual_symbols、world_rules、shot_intents；高级导演模式下必须直接使用用户提供的主角、世界观、视觉符号和连续性规则
 - timeline：数组，至少 5 项，必须覆盖完整 15 秒；每项含 time、shot、action、expression、audio
 - full_prompt：字符串，完整 15 秒英文视频提示词，必须包含时长、镜头、动作、转场、光影、风格、画面质感
 - negative_prompt：字符串，完整负向提示词，排除闪烁、畸形、塑料感、水印、文字、低清、动作不自然等

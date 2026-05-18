@@ -22,8 +22,16 @@ export const timelineSegmentSchema = z.object({
   audio: z.string().describe('环境声、音乐、台词或拟音提示'),
 });
 
+export const continuityPlanSchema = z.object({
+  protagonist_lock: z.string().describe('主角外观、身份和行为方式的连续性锁定'),
+  recurring_visual_symbols: z.array(z.string()).min(1).describe('需要跨镜头重复出现的固定视觉符号'),
+  world_rules: z.array(z.string()).min(1).describe('世界观、材质、光线、时代感等统一规则'),
+  shot_intents: z.array(z.string()).min(5).describe('每个时间段的单一镜头目的'),
+});
+
 export const optimizationOutputSchema = z.object({
   analysis: z.string().describe('原始提示词的问题与改进方向分析'),
+  continuity_plan: continuityPlanSchema.describe('短片统一审美和连续性管理方案'),
   timeline: z
     .array(timelineSegmentSchema)
     .min(5)
@@ -46,6 +54,12 @@ export type OptimizationOutput = z.infer<typeof optimizationOutputSchema>;
 
 export const OPTIMIZATION_OUTPUT_JSON_EXAMPLE = `{
   "analysis": "原始提示词的问题分析",
+  "continuity_plan": {
+    "protagonist_lock": "女孩始终保持同一件深色雨衣、同一把透明伞和克制警觉的行为方式。",
+    "recurring_visual_symbols": ["透明伞", "红绿霓虹倒影"],
+    "world_rules": ["整支短片保持雨夜霓虹巷道", "湿地反光和低调悬疑光线贯穿每个镜头"],
+    "shot_intents": ["建立地点与主角", "强化听觉线索", "制造回头悬念", "凝固情绪", "留下开放结尾"]
+  },
   "timeline": [
     {
       "time": "0-3s",
