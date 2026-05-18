@@ -42,7 +42,17 @@ const DEFAULT_ALLOWED_ORIGINS = new Set([
 const MAX_BODY_BYTES = 12_000;
 const MAX_MESSAGE_LENGTH = 2_000;
 const MAX_STYLE_LENGTH = 80;
+const MAX_REFINEMENT_CONTENT_LENGTH = 4_000;
+const MAX_REFINEMENT_LABEL_LENGTH = 120;
+const MAX_REFINEMENT_INSTRUCTION_LENGTH = 400;
 const MAX_HEADER_ID_LENGTH = 128;
+const VALID_REFINEMENT_TARGETS = new Set([
+  'full_prompt',
+  'negative_prompt',
+  'timeline_segment',
+  'platform_variant',
+  'version',
+]);
 
 function getAllowedOrigins(env: Env): Set<string> | '*' {
   if (env.ALLOWED_ORIGINS?.trim() === '*') return '*';
@@ -154,11 +164,50 @@ function normalizeOptimizeBody(raw: unknown): OptimizeRequestBody {
   }
 
   const style = typeof body.style === 'string' ? body.style.trim().slice(0, MAX_STYLE_LENGTH) : undefined;
+  let refinement: OptimizeRequestBody['refinement'];
+
+  if (body.refinement !== undefined) {
+    if (!body.refinement || typeof body.refinement !== 'object' || Array.isArray(body.refinement)) {
+      throw new Response(JSON.stringify({ success: false, error: 'refinement 必须是 JSON 对象' }), { status: 400 });
+    }
+
+    const rawRefinement = body.refinement as Record<string, unknown>;
+    const targetType = rawRefinement.targetType;
+    const label = rawRefinement.label;
+    const content = rawRefinement.content;
+    const instruction = rawRefinement.instruction;
+
+    if (typeof targetType !== 'string' || !VALID_REFINEMENT_TARGETS.has(targetType)) {
+      throw new Response(JSON.stringify({ success: false, error: 'refinement.targetType 无效' }), { status: 400 });
+    }
+    if (typeof label !== 'string' || !label.trim()) {
+      throw new Response(JSON.stringify({ success: false, error: 'refinement.label 必须是非空字符串' }), { status: 400 });
+    }
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Response(JSON.stringify({ success: false, error: 'refinement.content 必须是非空字符串' }), { status: 400 });
+    }
+    if (content.length > MAX_REFINEMENT_CONTENT_LENGTH) {
+      throw new Response(
+        JSON.stringify({ success: false, error: `refinement.content 不能超过 ${MAX_REFINEMENT_CONTENT_LENGTH} 个字符` }),
+        { status: 400 },
+      );
+    }
+
+    refinement = {
+      targetType: targetType as NonNullable<OptimizeRequestBody['refinement']>['targetType'],
+      label: label.trim().slice(0, MAX_REFINEMENT_LABEL_LENGTH),
+      content: content.trim(),
+      ...(typeof instruction === 'string' && instruction.trim()
+        ? { instruction: instruction.trim().slice(0, MAX_REFINEMENT_INSTRUCTION_LENGTH) }
+        : {}),
+    };
+  }
 
   return {
     message,
     scenario: normalizeScenario(body.scenario),
     ...(style ? { style } : {}),
+    ...(refinement ? { refinement } : {}),
   };
 }
 

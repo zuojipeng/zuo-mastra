@@ -49,41 +49,41 @@ export const OPTIMIZATION_OUTPUT_JSON_EXAMPLE = `{
   "timeline": [
     {
       "time": "0-3s",
-      "shot": "Wide shot, rain-soaked alley, slow dolly-in from behind the protagonist, hard cut into action.",
-      "action": "两名角色在狭窄巷口对峙，雨水从屋檐落下，地面积水反射霓虹。",
-      "expression": "主角压低眉眼，呼吸急促但克制，对手露出挑衅的冷笑。",
-      "audio": "Heavy rain, distant thunder, low cinematic drone, footsteps splashing."
+      "shot": "Wide shot, rain-soaked alley, slow dolly-in from behind the girl, neon reflections on wet asphalt.",
+      "action": "女孩独自走在雨夜巷口，听见身后脚步声后放慢脚步，雨水从屋檐落下。",
+      "expression": "她的眼神从游离变得警觉，呼吸变浅但仍保持克制。",
+      "audio": "Heavy rain, distant traffic hum, soft footsteps splashing behind her."
     },
     {
       "time": "3-6s",
-      "shot": "Medium handheld tracking shot, camera circles left, quick whip pan on first punch.",
-      "action": "第一拳擦过脸颊，角色侧身闪避，肘击反制，雨水随动作飞溅。",
-      "expression": "主角咬紧牙关，眼神从迟疑变得坚定。",
-      "audio": "Punch whoosh, wet fabric friction, short breath, bass hit."
+      "shot": "Medium close-up, handheld micro-movement, shallow depth of field, neon rim light on her face.",
+      "action": "女孩停下脚步，肩膀微微绷紧，手指攥住外套边缘，慢慢侧耳倾听。",
+      "expression": "她的眉眼压低，嘴唇微张，警觉中带着克制的不安。",
+      "audio": "Rain grows louder, footsteps become clearer, low suspense drone."
     },
     {
       "time": "6-9s",
-      "shot": "Low-angle close-up, 35mm lens, shallow depth of field, slow motion for impact.",
-      "action": "双方近身缠斗，膝撞、格挡、推向墙面，墙上霓虹灯闪烁。",
-      "expression": "对手愤怒失控，主角脸上混合疼痛与决绝。",
-      "audio": "Muffled impact, neon buzz, rain intensifies."
+      "shot": "Over-the-shoulder shot, slow push-in, background figure remains out of focus.",
+      "action": "她缓慢回头，伞面边缘划过画面，身后的模糊影子停在远处。",
+      "expression": "她的瞳孔微微放大，表情在害怕和好奇之间摇摆。",
+      "audio": "Single piano note, rain on umbrella, footsteps stop."
     },
     {
       "time": "9-12s",
-      "shot": "Overhead shot transitions into tight close-up, match cut on falling water.",
-      "action": "两人同时发起最后一击，拳头命中对方，身体失去平衡。",
-      "expression": "两人眼神短暂交汇，表情从狠厉转为震惊。",
-      "audio": "Music drops out, single heartbeat, sharp impact."
+      "shot": "Tight close-up, 35mm lens, neon red and green reflections moving across her face.",
+      "action": "她没有后退，只是轻轻屏住呼吸，雨水沿着发梢滴落到肩头。",
+      "expression": "紧张逐渐变成一种复杂的释然，眼神仍保持警惕。",
+      "audio": "Heartbeat-like bass, neon buzz, rain softens for a moment."
     },
     {
       "time": "12-15s",
-      "shot": "Static wide shot, slow push-in, final fade to black.",
-      "action": "两人同时倒入水洼，雨水打在脸上，霓虹倒影被涟漪撕碎。",
-      "expression": "主角闭眼前露出疲惫的释然，对手停止挣扎。",
-      "audio": "Rain only, distant siren, final low boom."
+      "shot": "Static wide shot, slow push-in, alley framed by neon signs and deep shadows.",
+      "action": "女孩转身继续向前走，身后的脚步声没有再靠近，水洼中的霓虹被涟漪打散。",
+      "expression": "她恢复平静，但眼神里还残留一丝不安。",
+      "audio": "Rain only, distant traffic, final low ambient note."
     }
   ],
-  "full_prompt": "15-second cinematic video, ...",
+  "full_prompt": "15-second cinematic video, a girl in a rain-soaked neon alley hears footsteps behind her...",
   "negative_prompt": "plastic texture, bad anatomy, extra limbs, flickering, inconsistent lighting, watermark, text overlay...",
   "versions": [
     {

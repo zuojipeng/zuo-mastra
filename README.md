@@ -34,6 +34,29 @@ npm run check
 }
 ```
 
+局部继续优化请求：
+
+```json
+{
+  "message": "让这个镜头更有压迫感，动作更清楚",
+  "scenario": "video",
+  "refinement": {
+    "targetType": "timeline_segment",
+    "label": "3-6s 分镜",
+    "content": "时间：3-6s\n镜头：Medium close-up...\n动作：女孩停下脚步...",
+    "instruction": "保留原始创意，增强镜头清晰度和可生成性"
+  }
+}
+```
+
+`refinement.targetType` 可选值：
+
+- `full_prompt`
+- `negative_prompt`
+- `timeline_segment`
+- `platform_variant`
+- `version`
+
 请求头：
 
 | Header | Required | Notes |
