@@ -8,7 +8,7 @@ import {
   normalizeScenario,
   type OptimizeRequestBody,
 } from './src/mastra/agents/build-user-message';
-import { parseOptimizationOutputV2, type V2OptimizationOutput } from './src/mastra/schemas/optimization-output';
+import { parseOptimizationOutputV3, type V3OptimizationOutput } from './src/mastra/schemas/optimization-output';
 import {
   DEEPSEEK_BASE_URL,
   DEEPSEEK_MODEL_NAME,
@@ -286,23 +286,23 @@ function includesText(haystack: string, needle: string): boolean {
 }
 
 function enforceProjectBibleContinuity(
-  output: V2OptimizationOutput,
+  output: V3OptimizationOutput,
   projectBible: OptimizeRequestBody['projectBible'],
-): V2OptimizationOutput {
-  if (!projectBible) {
-    return output;
-  }
+): V3OptimizationOutput {
+  if (!projectBible) return output;
 
   const symbols = projectBible.visualSymbols?.filter(Boolean).slice(0, MAX_PROJECT_BIBLE_ARRAY_ITEMS) ?? [];
   if (!symbols.length) return output;
 
-  const missingSymbols = symbols.filter((symbol) => !includesText(output.prompt, symbol));
-  if (!missingSymbols.length) return output;
+  const updatedPrompts = output.prompts.map((prompt, index) => {
+    const missingSymbols = symbols.filter((symbol) => !includesText(prompt, symbol));
+    if (!missingSymbols.length) return prompt;
+    // Distribute missing symbols across prompts
+    const symbolForThisPrompt = missingSymbols[index % missingSymbols.length];
+    return `${prompt} 画面中出现了${symbolForThisPrompt}。`;
+  });
 
-  return {
-    ...output,
-    prompt: `${output.prompt} 画面中出现了${missingSymbols.join('、')}。`,
-  };
+  return { ...output, prompts: updatedPrompts };
 }
 
 async function saveConversation(
@@ -468,6 +468,10 @@ export default {
       try {
         const body = normalizeOptimizeBody(await readJsonBody(request));
         const { message, scenario, style, projectBible } = body;
+        const shotCount: number =
+          typeof (body as Record<string, unknown>).shotCount === 'number'
+            ? Math.max(1, Math.min(10, Math.floor((body as Record<string, unknown>).shotCount as number)))
+            : 1;
 
         const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
         const sessionId = sanitizeHeaderId(request.headers.get('X-Session-Id'), generateId());
@@ -512,13 +516,20 @@ export default {
         });
 
         const userContent = buildUserMessage({ message, scenario, style, projectBible });
-        messages.push({ role: 'user', content: userContent });
+        if (shotCount > 1) {
+          messages[messages.length - 1] = {
+            role: 'user',
+            content: `${userContent}\n\n[镜头数要求：请生成 ${shotCount} 个连续镜头的画面描述，镜头之间要有叙事因果和景别变化。]`,
+          };
+        } else {
+          messages.push({ role: 'user', content: userContent });
+        }
 
         const responseText = await callDeepSeekChat(llmApiKey, messages);
-        let structured: V2OptimizationOutput;
+        let structured: V3OptimizationOutput;
 
         try {
-          structured = parseOptimizationOutputV2(responseText);
+          structured = parseOptimizationOutputV3(responseText);
         } catch (parseError) {
           console.error('JSON parse failed, returning raw text:', parseError);
           return jsonResponse(
@@ -558,9 +569,10 @@ export default {
               originalPrompt: message,
               scenario,
               style: style ?? null,
-              prompt: structured.prompt,
-              shotCount: 1,
-              result: { full_prompt: structured.prompt },
+              prompt: structured.prompts[0],
+              prompts: structured.prompts,
+              shotCount: structured.prompts.length,
+              result: { full_prompt: structured.prompts[0] },
               sessionId,
               hasHistory: conversationHistory.length > 0,
             },

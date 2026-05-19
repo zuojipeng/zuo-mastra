@@ -1,108 +1,226 @@
-/** AI 视频/视觉创作提示词专业知识库（嵌入 system prompt） */
+/** AI 视频创作专业知识库 v2 — 电影级镜头语言与导演技法 */
 
-export const CAMERA_LANGUAGE_TERMS = [
-  'establishing wide shot',
-  'medium close-up',
-  'tight close-up',
-  'locked-off tripod shot',
-  'slow dolly-in',
-  'side tracking shot',
-  'over-the-shoulder composition',
-  'low-angle hero shot',
-  'eye-level documentary framing',
-  'foreground occlusion',
-  'motivated camera movement',
-  'shallow depth of field',
-  'deep focus',
-  '35mm lens',
-  '50mm lens',
-  '85mm portrait lens',
-  'anamorphic',
-  'subtle handheld micro-shake',
-  'steadicam walk-and-talk',
-] as const;
+// ═══════════════════════════════════════
+// 一、景别体系（中文术语 + 叙事功能）
+// ═══════════════════════════════════════
 
-export const LIGHTING_ATMOSPHERE_TERMS = [
-  'natural practical lighting',
-  'motivated light source',
-  'Rembrandt lighting',
-  'soft window light',
-  'overcast daylight',
-  'sodium streetlight',
-  'volumetric fog',
-  'golden hour',
-  'rim light',
-  'high contrast',
-  'soft diffused light',
-  'chiaroscuro',
-  'realistic shadow falloff',
-] as const;
+export const SHOT_SIZES = {
+  extremeWide: '极远景：建立空间尺度，人物在环境中显得渺小孤立，适合开场或结尾',
+  wide: '全景：展示人物全身与环境关系，动作清晰可见',
+  medium: '中景：腰部以上，最常用的叙事景别，兼顾肢体和表情',
+  mediumCloseUp: '近景：胸部以上，强调面部表情，弱化环境干扰',
+  closeUp: '特写：面部占满画面，极强的情感冲击力',
+  extremeCloseUp: '大特写：单一器官或物体细节，制造紧张或仪式感',
+} as const;
 
-export const STYLE_TEXTURE_TERMS = [
-  'photorealistic live-action footage',
-  'documentary realism',
-  'cinematic realism',
-  'high-detail skin texture',
-  'natural fabric texture',
-  'real glass and metal reflections',
-  'production design realism',
-  'film grain',
-  '8k resolution',
-  'raw footage',
-  'vintage 16mm',
-  'subtle professional color grade',
-] as const;
+// ═══════════════════════════════════════
+// 二、运镜技法（中文术语 + 情感语言）
+// ═══════════════════════════════════════
 
-export const MOTION_TIMING_TERMS = [
-  'slow-motion',
-  'time-lapse',
-  'motivated subject movement',
-  'static shot',
-  'smooth camera glide',
-  'parallax',
-  'match cut',
-  'hold on reaction',
-  'one action beat per shot',
-] as const;
+export const CAMERA_MOVEMENTS = {
+  dollyIn: '缓慢推近：空间压缩，注意力集中，从外部观察转变为内心介入',
+  dollyOut: '缓慢拉远：揭示更大语境，人物变小变孤独，适合结尾',
+  pan: '水平摇摄：扫视环境，探索空间宽度，警觉搜寻感',
+  tilt: '垂直俯仰：从局部揭示到整体或反之，压迫或脆弱感',
+  tracking: '侧面跟拍：与主体同步移动，沉浸式参与，紧张跟随',
+  steadicam: '稳定漂浮跟拍：幽灵般平滑的视角，第一人称代入感',
+  handheld: '手持晃动：不稳定真实感，纪录片质感，混乱急迫',
+  craneUp: '缓缓升起：从地面升到空中，升华感，史诗结局',
+  dollyZoom: '推拉变焦：空间扭曲的眩晕效果，主体不变背景压缩或拉伸',
+  static: '固定机位：冷静观察，让画面内的动作成为唯一焦点',
+} as const;
 
-export const DEFAULT_NEGATIVE_PROMPT_TERMS = [
-  'plastic texture',
-  'waxy skin',
-  'bad anatomy',
-  'extra limbs',
-  'deformed hands',
-  'distorted fingers',
-  'face morphing',
-  'identity drift',
-  'duplicate person',
-  'jpeg artifacts',
-  'oversmooth skin',
-  '3D render look',
-  'CGI look',
-  'watermark',
-  'text overlay',
-  'blurry',
-  'soft focus unless intended',
-  'low-detail background',
-  'mushy texture',
-  'distorted face',
-  'flickering',
-  'inconsistent lighting',
-  'inconsistent scale',
-  'warped architecture',
-  'low resolution',
-  'cartoonish unless intended',
-] as const;
+// ═══════════════════════════════════════
+// 三、机位角度（中文术语 + 权力关系）
+// ═══════════════════════════════════════
 
-/** 导演模式：风格预设关键词（前端可传 style 字段） */
+export const CAMERA_ANGLES = {
+  eyeLevel: '平视：中性客观，观众与角色地位平等',
+  lowAngle: '低角度仰拍：主体显得强大、威胁或英雄化',
+  highAngle: '高角度俯拍：主体显得弱小、被困、被审视',
+  dutchAngle: '倾斜构图：地平线歪斜，心理失衡，危险即将来临的不安感',
+  overShoulder: '过肩镜头：对话场景标准机位，前景虚化的肩膀+对焦的人脸',
+  pov: '主观视角：角色所见即观众所见，完全代入体验',
+  birdsEye: '鸟瞰：完全垂直的上帝视角，去人性化的审视或地图式展开',
+} as const;
+
+// ═══════════════════════════════════════
+// 四、构图法则
+// ═══════════════════════════════════════
+
+export const COMPOSITION_RULES = {
+  ruleOfThirds: '三分法构图：主体放在画面三分之一交点上，留出视线空间',
+  symmetry: '对称构图：左右完全对称，秩序感或压迫感，韦斯·安德森标志',
+  leadingLines: '引导线构图：道路或光轨从前景延伸到主体，强化视觉方向',
+  frameInFrame: '框中框构图：窗户或门框作为画中画，增加层次和窥视感',
+  negativeSpace: '负空间构图：大面积留白，突出主体的孤立和孤独',
+  foregroundDepth: '前景层次：虚化的前景遮挡+中景主体+远景环境，电影感纵深',
+} as const;
+
+// ═══════════════════════════════════════
+// 五、光影体系（中文术语 + 情绪导向）
+// ═══════════════════════════════════════
+
+export const LIGHTING_STYLES = {
+  rembrandt: '伦勃朗光：侧上方主光在颧骨下方形成三角光斑，古典庄重',
+  butterfly: '蝴蝶光：正面高位置光源在鼻下投出精致小阴影，经典好莱坞肖像',
+  lowKey: '低调光：大面积阴影吞噬细节，仅窄缝光勾勒边缘，神秘危险',
+  highKey: '高调光：均匀明亮几乎无阴影，轻松喜剧感',
+  silhouette: '逆光剪影：主体全黑轮廓+明亮背景，神秘标志性',
+  practical: '实用光源：画面内可见光源驱动，烛光或台灯的暖色跳动',
+  goldenHour: '黄金时刻：日出日落的暖金色斜射光，怀旧希望浪漫',
+  blueHour: '蓝调时刻：日落后冷蓝色天光，孤独沉思过渡',
+  rimLight: '轮廓光：发丝边缘的金色光边，将主体从暗背景中分离',
+  volumetric: '体积光：可见的光束穿过雾气或尘埃，神圣或末世感',
+} as const;
+
+// ═══════════════════════════════════════
+// 六、色彩方案（中文描述 + 情绪映射）
+// ═══════════════════════════════════════
+
+export const COLOR_PALETTES = {
+  tealOrange: '青橙互补色：冷青色暗部+暖橙色高光，现代电影标配，视觉冲击强',
+  desaturated: '去饱和：接近黑白但保留微弱锈色或蓝色，压抑末世感',
+  monochromaticGreen: '单色墨绿：统一的墨绿色调贯穿，像浸泡在深水中，压抑或腐败',
+  neonNoir: '霓虹暗调：品红与青色高对比，赛博朋克都市夜景',
+  warmVintage: '暖调怀旧：琥珀色和深红主导，不真实的怀旧感，记忆或梦境',
+  coldSteel: '冷钢蓝灰：统一的蓝灰色调，科技冷漠，大卫·芬奇标志',
+  goldenEpic: '史诗金色：暖橙金色光线+深棕阴影，宏大叙事，雷德利·斯科特标志',
+} as const;
+
+// ═══════════════════════════════════════
+// 七、导演风格知识库 v2（中文详细描述，可直接注入提示词）
+// ═══════════════════════════════════════
+
 export const DIRECTOR_STYLE_PRESETS: Record<string, string> = {
-  'wong-kar-wai': 'inspired by Wong Kar-wai, neon-soaked streets, step-printing motion blur, melancholic romance, saturated reds and greens',
-  'wes-anderson': 'Wes Anderson style, symmetrical framing, pastel palette, whimsical deadpan, flat staging',
-  epic: 'epic cinematic scale, sweeping wide shots, dramatic orchestral mood, golden hour, heroic composition',
-  cyberpunk: 'cyberpunk aesthetic, neon noir, rain-slick streets, holographic ads, high contrast magenta and cyan',
-  documentary: 'documentary realism, handheld subtle shake, natural light, observational framing, authentic texture',
+  // 王家卫
+  'wong-kar-wai': [
+    '浓郁的霓虹绿色调或深红色调，抽帧式的断续慢动作（step-printing）',
+    '雨夜湿街的霓虹倒影，前景虚化的遮挡物（玻璃/雨帘/人群）',
+    '手持微晃的孤独跟随感，镜面反射中的侧脸',
+    '浓郁的孤独氛围，城市夜晚的疏离感，慢速快门的光轨拖影',
+  ].join('；'),
+
+  // 韦斯·安德森
+  'wes-anderson': [
+    '严格对称的正面构图，所有元素精确排列',
+    '柔和的粉彩色调（粉红/淡黄/薄荷绿/婴儿蓝），如复古绘本',
+    '平面化正面镜头，人物正对镜头面无表情',
+    '精致的场景设计，每个物品都像被精确放置',
+  ].join('；'),
+
+  // 赛博朋克
+  'cyberpunk': [
+    '蓝紫色调+品红色高光的高对比度光影，永不停歇的细雨',
+    '全息投影广告牌在潮湿街道上的倒影，密集的垂直城市峡谷',
+    '机械义体和铬金属反光，烟雾和蒸汽弥漫',
+    '去人性化的巨型建筑压迫渺小个体',
+  ].join('；'),
+
+  // 史诗感
+  'epic': [
+    '金色或暖橙色调光线斜射，烟尘中可见的光束',
+    '极远景的巨大尺度对比，人物小如尘埃',
+    '极慢镜头推进，壮丽的自然或建筑景观',
+    '英雄姿态的剪影，光晕效果，大气磅礴',
+  ].join('；'),
+
+  // 纪录片写实
+  'documentary': [
+    '手持轻微晃动的真实感，自然光线无补光',
+    '平视机位的观察者视角，不干扰被摄对象',
+    '去饱和或自然色彩，不做风格化调色',
+    '粗糙质感，偶有失焦和镜头眩光，强调真实而非完美',
+  ].join('；'),
+
+  // 诺兰风格
+  'nolan': [
+    'IMAX 级别的超广角视野，极低角度仰拍使建筑无穷高',
+    '交叉剪辑式的时间感，慢速推近配合低音轰鸣',
+    '冷蓝色调+暖橙色的精准互补，画面如手术刀般精确',
+    '宏大尺度与微小细节并置，现实与超现实的模糊边界',
+  ].join('；'),
+
+  // 维伦纽瓦风格
+  'villeneuve': [
+    '极简主义构图，巨大几何结构与渺小人物的尺度对比',
+    '冷蓝色调或暖沙色调，缓慢到令人窒息的推轨',
+    '雾气和沙尘遮蔽视线，声音设计般的视觉留白',
+    '去人性化的建筑美学，空旷空间中弥漫的孤独与敬畏',
+  ].join('；'),
+
+  // 大卫·芬奇风格
+  'fincher': [
+    '冷蓝绿色调或去饱和灰色调，锁定机位无多余晃动',
+    '低调光的锐利阴影边缘，如手术灯般冷静',
+    '精准到每一帧的构图，画面暗部细节丰富',
+    '压抑克制的氛围，暴力或冲突在平静表面下暗涌',
+  ].join('；'),
+
+  // 黑色电影
+  'film-noir': [
+    '近乎黑白的高反差低调光，百叶窗条纹光影切割画面',
+    '香烟烟雾在光束中缓慢上升，琥珀色或蓝灰色单色调',
+    '蛇蝎美人的剪影，湿润的反光街道，都市疏离',
+    '闪回式的非线性时间感，命运不可逃避的宿命氛围',
+  ].join('；'),
+
+  // 恐怖/悬疑
+  'horror': [
+    '负空间构图让观众主动在阴影中寻找威胁',
+    '极其缓慢的推轨逼近黑暗深处，制造预期焦虑',
+    '唯一光源是摇曳的手电筒或蜡烛，周围全黑',
+    '安全环境中的微小异常，荷兰角倾斜构图暗示世界失衡',
+  ].join('；'),
 };
+
+// ═══════════════════════════════════════
+// 八、镜头焦段（中文描述）
+// ═══════════════════════════════════════
+
+export const LENS_CHARACTERISTICS = {
+  wideAngle: '广角镜头效果：拉伸空间透视，前景放大背景推远，适合狭窄空间和夸张视角',
+  standard: '标准镜头效果：接近人眼自然视角，无畸变，适合写实叙事',
+  telephoto: '长焦镜头效果：压缩空间层次，背景拉近虚化，适合肖像和偷窥视角',
+  anamorphic: '变形宽银幕效果：水平拉伸的电影感，椭圆形虚化光斑，史诗画幅',
+  macro: '微距镜头效果：极端近距离的细节，毛孔和纹理清晰可见',
+} as const;
+
+// ═══════════════════════════════════════
+// 九、叙事节奏指导
+// ═══════════════════════════════════════
+
+export const NARRATIVE_RHYTHM = {
+  opening: '开场建立（2-3秒）：用一个强烈的视觉印象建立时间、地点、情绪',
+  reveal: '渐进揭示（3-5秒）：从局部到整体，或从模糊到清晰的信息展开',
+  climax: '高潮时刻（1-2秒）：关键动作或表情，慢动作特写，最强的视觉冲击',
+  closing: '余韵收尾（2-3秒）：镜头缓慢拉远或固定，留给观众消化情绪的空间',
+} as const;
+
+// ═══════════════════════════════════════
+// 十、提示词写作黄金法则
+// ═══════════════════════════════════════
+
+export const PROMPT_GOLDEN_RULES = [
+  '画面先行：每句话描述摄影机会拍到什么，不是「应该怎么拍」',
+  '一个镜头一个动作：不要堆砌多个事件，聚焦一个清晰的视觉瞬间',
+  '光影是情绪引擎：布光描述比动作描述更能塑造氛围',
+  '颜色制造记忆点：一个强烈的色调比十句描述更让人记住',
+  '参考具体导演：说「维伦纽瓦式的冷峻构图」比说「电影感」精准百倍',
+  '前景+中景+远景：三层空间感是电影感的核心来源',
+  '用具体细节替代抽象形容词：不说「美丽的光」，说「金色斜阳穿过百叶窗在地板上投下条纹光影」',
+  '镜头运动要服务情绪：紧张用手持，史诗用缓慢升起，孤独用固定机位',
+] as const;
+
+// ═══════════════════════════════════════
+// 工具函数
+// ═══════════════════════════════════════
 
 export function formatTermList(terms: readonly string[]): string {
   return terms.join(', ');
+}
+
+/** 将知识库中的条目扁平化为提示词可用的中文关键词列表 */
+export function flattenKnowledge(values: Record<string, string>): string {
+  return Object.values(values).join('；\n');
 }

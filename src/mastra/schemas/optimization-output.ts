@@ -158,10 +158,34 @@ export const v2OptimizationOutputSchema = z.object({
 
 export type V2OptimizationOutput = z.infer<typeof v2OptimizationOutputSchema>;
 
+// ── V3: 多镜头 schema，prompts 数组 ──
+
+export const v3OptimizationOutputSchema = z.object({
+  prompts: z
+    .array(z.string().describe('单个镜头的纯中文画面描述，100-200字'))
+    .min(1)
+    .max(10)
+    .describe('镜头序列，每个 prompt 独立可用，镜头之间有叙事因果'),
+});
+
+export type V3OptimizationOutput = z.infer<typeof v3OptimizationOutputSchema>;
+
 export function parseOptimizationOutputV2(text: string): V2OptimizationOutput {
   const trimmed = text.trim();
   const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, trimmed];
   const jsonStr = (jsonMatch[1] ?? trimmed).trim();
   const parsed = JSON.parse(jsonStr) as unknown;
   return v2OptimizationOutputSchema.parse(parsed);
+}
+
+export function parseOptimizationOutputV3(text: string): V3OptimizationOutput {
+  const trimmed = text.trim();
+  const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, trimmed];
+  const jsonStr = (jsonMatch[1] ?? trimmed).trim();
+  const parsed = JSON.parse(jsonStr) as unknown;
+  // 兼容 v2 格式：{prompt: "..."} 自动转为 {prompts: ["..."]}
+  if (typeof (parsed as Record<string, unknown>).prompt === 'string' && !(parsed as Record<string, unknown>).prompts) {
+    (parsed as Record<string, unknown>).prompts = [(parsed as Record<string, unknown>).prompt];
+  }
+  return v3OptimizationOutputSchema.parse(parsed);
 }
