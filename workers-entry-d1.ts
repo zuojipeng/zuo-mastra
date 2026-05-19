@@ -8,7 +8,7 @@ import {
   normalizeScenario,
   type OptimizeRequestBody,
 } from './src/mastra/agents/build-user-message';
-import { parseOptimizationOutput, type OptimizationOutput } from './src/mastra/schemas/optimization-output';
+import { parseOptimizationOutputV2, type V2OptimizationOutput } from './src/mastra/schemas/optimization-output';
 import {
   DEEPSEEK_BASE_URL,
   DEEPSEEK_MODEL_NAME,
@@ -286,66 +286,22 @@ function includesText(haystack: string, needle: string): boolean {
 }
 
 function enforceProjectBibleContinuity(
-  output: OptimizationOutput,
+  output: V2OptimizationOutput,
   projectBible: OptimizeRequestBody['projectBible'],
-): OptimizationOutput {
+): V2OptimizationOutput {
   if (!projectBible) {
     return output;
   }
 
   const symbols = projectBible.visualSymbols?.filter(Boolean).slice(0, MAX_PROJECT_BIBLE_ARRAY_ITEMS) ?? [];
-  const recurringSymbols = Array.from(new Set([...symbols, ...output.continuity_plan.recurring_visual_symbols]));
-  const protagonistLock = [projectBible.protagonist, output.continuity_plan.protagonist_lock]
-    .filter((value): value is string => Boolean(value))
-    .join('；');
-  const worldRules = Array.from(
-    new Set(
-      [
-        projectBible.world,
-        projectBible.lookAndFeel ? `统一视觉风格：${projectBible.lookAndFeel}` : undefined,
-        ...(projectBible.continuityRules ?? []),
-        ...output.continuity_plan.world_rules,
-      ].filter((value): value is string => Boolean(value)),
-    ),
-  );
+  if (!symbols.length) return output;
 
-  const timelineText = JSON.stringify(output.timeline);
-  symbols.forEach((symbol, index) => {
-    if (!includesText(timelineText, symbol)) {
-      const target = output.timeline[index % output.timeline.length];
-      target.action = `${target.action} 固定视觉符号：${symbol}保持可见。`;
-    }
-  });
-
-  const requiredSymbolText = symbols.length ? ` Recurring visual symbols: ${symbols.join(', ')}.` : '';
-  const fullPrompt =
-    symbols.length && !symbols.every((symbol) => includesText(output.full_prompt, symbol))
-      ? `${output.full_prompt}${requiredSymbolText}`
-      : output.full_prompt;
+  const missingSymbols = symbols.filter((symbol) => !includesText(output.prompt, symbol));
+  if (!missingSymbols.length) return output;
 
   return {
     ...output,
-    continuity_plan: {
-      protagonist_lock: protagonistLock || output.continuity_plan.protagonist_lock,
-      recurring_visual_symbols: recurringSymbols.length ? recurringSymbols : output.continuity_plan.recurring_visual_symbols,
-      world_rules: worldRules.length ? worldRules : output.continuity_plan.world_rules,
-      shot_intents: output.continuity_plan.shot_intents,
-    },
-    full_prompt: fullPrompt,
-    versions: output.versions.map((version) => ({
-      ...version,
-      positive_prompt:
-        symbols.length && !symbols.every((symbol) => includesText(version.positive_prompt, symbol))
-          ? `${version.positive_prompt}${requiredSymbolText}`
-          : version.positive_prompt,
-    })),
-    platform_variants: output.platform_variants.map((variant) => ({
-      ...variant,
-      prompt:
-        symbols.length && !symbols.every((symbol) => includesText(variant.prompt, symbol))
-          ? `${variant.prompt}${requiredSymbolText}`
-          : variant.prompt,
-    })),
+    prompt: `${output.prompt} 画面中出现了${missingSymbols.join('、')}。`,
   };
 }
 
@@ -559,10 +515,10 @@ export default {
         messages.push({ role: 'user', content: userContent });
 
         const responseText = await callDeepSeekChat(llmApiKey, messages);
-        let structured: ReturnType<typeof parseOptimizationOutput>;
+        let structured: V2OptimizationOutput;
 
         try {
-          structured = parseOptimizationOutput(responseText);
+          structured = parseOptimizationOutputV2(responseText);
         } catch (parseError) {
           console.error('JSON parse failed, returning raw text:', parseError);
           return jsonResponse(
@@ -602,7 +558,9 @@ export default {
               originalPrompt: message,
               scenario,
               style: style ?? null,
-              result: structured,
+              prompt: structured.prompt,
+              shotCount: 1,
+              result: { full_prompt: structured.prompt },
               sessionId,
               hasHistory: conversationHistory.length > 0,
             },

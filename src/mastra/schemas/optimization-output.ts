@@ -149,3 +149,19 @@ export function parseOptimizationOutput(text: string): OptimizationOutput {
   const parsed = JSON.parse(jsonStr) as unknown;
   return optimizationOutputSchema.parse(parsed);
 }
+
+// ── V2: 简化 schema，只输出纯中文画面描述 ──
+
+export const v2OptimizationOutputSchema = z.object({
+  prompt: z.string().describe('纯中文画面描述，100-200字，四段式：主体外观→动作环境→镜头设定→风格设定'),
+});
+
+export type V2OptimizationOutput = z.infer<typeof v2OptimizationOutputSchema>;
+
+export function parseOptimizationOutputV2(text: string): V2OptimizationOutput {
+  const trimmed = text.trim();
+  const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, trimmed];
+  const jsonStr = (jsonMatch[1] ?? trimmed).trim();
+  const parsed = JSON.parse(jsonStr) as unknown;
+  return v2OptimizationOutputSchema.parse(parsed);
+}
