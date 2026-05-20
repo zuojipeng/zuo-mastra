@@ -467,7 +467,7 @@ export default {
     if (url.pathname === '/api/optimize' && request.method === 'POST') {
       try {
         const body = normalizeOptimizeBody(await readJsonBody(request));
-        const { message, scenario, style, projectBible } = body;
+        const { message, scenario, style, projectBible, refinement } = body;
         const shotCount: number =
           typeof (body as Record<string, unknown>).shotCount === 'number'
             ? Math.max(1, Math.min(10, Math.floor((body as Record<string, unknown>).shotCount as number)))
@@ -515,7 +515,7 @@ export default {
           });
         });
 
-        const userContent = buildUserMessage({ message, scenario, style, projectBible });
+        const userContent = buildUserMessage({ message, scenario, style, projectBible, refinement });
         if (shotCount > 1) {
           messages[messages.length - 1] = {
             role: 'user',
