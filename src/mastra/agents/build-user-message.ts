@@ -4,6 +4,7 @@ export type OptimizeRequestBody = {
   message: string;
   scenario?: OptimizationScenario;
   style?: string;
+  shotCount?: number;
   projectBible?: {
     protagonist?: string;
     mission?: string;

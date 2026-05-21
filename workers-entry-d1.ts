@@ -37,6 +37,9 @@ const DEFAULT_ALLOWED_ORIGINS = new Set([
   'https://prompt-optimizer-frontend.pages.dev',
   'https://prompt-mastra-agent-ui.pages.dev',
   'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3003',
+  'http://localhost:3005',
   'http://127.0.0.1:3000',
 ]);
 
@@ -184,6 +187,13 @@ function normalizeOptimizeBody(raw: unknown): OptimizeRequestBody {
 
   const style = typeof body.style === 'string' ? body.style.trim().slice(0, MAX_STYLE_LENGTH) : undefined;
   let projectBible: OptimizeRequestBody['projectBible'];
+  let shotCount: number | undefined;
+  if (typeof body.shotCount === 'number') {
+    shotCount = body.shotCount;
+  } else if (typeof body.shotCount === 'string') {
+    const parsed = parseInt(body.shotCount, 10);
+    if (!isNaN(parsed)) shotCount = parsed;
+  }
   let refinement: OptimizeRequestBody['refinement'];
 
   if (body.projectBible !== undefined) {
@@ -264,6 +274,7 @@ function normalizeOptimizeBody(raw: unknown): OptimizeRequestBody {
     message,
     scenario: normalizeScenario(body.scenario),
     ...(style ? { style } : {}),
+    ...(shotCount !== undefined ? { shotCount: Math.max(1, Math.min(10, Math.floor(shotCount))) } : {}),
     ...(projectBible ? { projectBible } : {}),
     ...(refinement ? { refinement } : {}),
   };
@@ -467,12 +478,9 @@ export default {
     if (url.pathname === '/api/optimize' && request.method === 'POST') {
       try {
         const body = normalizeOptimizeBody(await readJsonBody(request));
-        const { message, scenario, style, projectBible, refinement } = body;
-        const shotCount: number =
-          typeof (body as Record<string, unknown>).shotCount === 'number'
-            ? Math.max(1, Math.min(10, Math.floor((body as Record<string, unknown>).shotCount as number)))
-            : 1;
-
+        const { message, scenario, style, projectBible, refinement, shotCount } = body;
+        const shotCountValue: number =
+          shotCount ?? 1;
         const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
         const sessionId = sanitizeHeaderId(request.headers.get('X-Session-Id'), generateId());
         const rateLimitKey = `${getClientIp(request)}:${userId}`;
@@ -516,14 +524,11 @@ export default {
         });
 
         const userContent = buildUserMessage({ message, scenario, style, projectBible, refinement });
-        if (shotCount > 1) {
-          messages[messages.length - 1] = {
-            role: 'user',
-            content: `${userContent}\n\n[镜头数要求：请生成 ${shotCount} 个连续镜头的画面描述，镜头之间要有叙事因果和景别变化。]`,
-          };
-        } else {
-          messages.push({ role: 'user', content: userContent });
-        }
+        const shotHint = shotCount > 1
+          ? `\n\n[硬性要求：你必须生成 ${shotCount} 个镜头，一个不能少]\n请严格按照以下JSON格式输出，prompts数组必须有 ${shotCount} 个元素：\n{"prompts": ["镜头1画面描述...", "镜头2画面描述...", ...共${shotCount}个]}
+`
+          : '';
+        messages.push({ role: 'user', content: `${userContent}${shotHint}` });
 
         const responseText = await callDeepSeekChat(llmApiKey, messages);
         let structured: V3OptimizationOutput;
