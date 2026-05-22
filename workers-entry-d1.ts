@@ -407,6 +407,36 @@ function ensureConversationSchema(db: D1Db): Promise<void> {
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_id ON conversations(user_id)`).bind().run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_session_id ON conversations(session_id)`).bind().run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_created_at ON conversations(created_at DESC)`).bind().run();
+    // Feedback table
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS feedbacks (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          input TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          shot_index INTEGER NOT NULL DEFAULT 0,
+          rating TEXT NOT NULL CHECK(rating IN ('like','dislike')),
+          comment TEXT DEFAULT '',
+          created_at INTEGER NOT NULL
+        )`,
+      )
+      .bind()
+      .run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedbacks(user_id)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedbacks(rating)`).bind().run();
+    // User data table for cross-device sync
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS user_data (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL UNIQUE,
+          payload TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+      )
+      .bind()
+      .run();
   })().catch((error) => {
     schemaReadyPromise = undefined;
     throw error;
@@ -630,6 +660,116 @@ export default {
         const err = error as Error;
         console.error('History error:', err);
         return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+      }
+    }
+
+    // ── Feedback API ──
+    if (url.pathname === '/api/feedback') {
+      if (request.method === 'POST') {
+        try {
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          if (!env.DB) {
+            return jsonResponse({ success: false, error: 'Database not configured' }, 500, request, env);
+          }
+          const raw = await readJsonBody(request) as Record<string, unknown>;
+          const id = generateId();
+          const input = typeof raw.input === 'string' ? raw.input.slice(0, 2000) : '';
+          const prompt = typeof raw.prompt === 'string' ? raw.prompt.slice(0, 4000) : '';
+          const shotIndex = typeof raw.shotIndex === 'number' ? Math.max(0, Math.floor(raw.shotIndex)) : 0;
+          const rating = raw.rating === 'like' || raw.rating === 'dislike' ? raw.rating : null;
+          const comment = typeof raw.comment === 'string' ? raw.comment.slice(0, 1000) : '';
+          if (!rating) {
+            return jsonResponse({ success: false, error: 'rating 必须是 like 或 dislike' }, 400, request, env);
+          }
+          await ensureConversationSchema(env.DB);
+          await env.DB
+            .prepare(
+              `INSERT INTO feedbacks (id, user_id, input, prompt, shot_index, rating, comment, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .bind(id, userId, input, prompt, shotIndex, rating, comment, Date.now())
+            .run();
+          return jsonResponse({ success: true, data: { id } }, 200, request, env);
+        } catch (error) {
+          console.error('Feedback error:', error);
+          return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+        }
+      }
+      if (request.method === 'GET') {
+        try {
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          if (!env.DB) {
+            return jsonResponse({ success: false, error: 'Database not configured' }, 500, request, env);
+          }
+          await ensureConversationSchema(env.DB);
+          const { results } = await env.DB
+            .prepare(
+              `SELECT rating, COUNT(*) as count FROM feedbacks
+               WHERE user_id = ? GROUP BY rating`,
+            )
+            .bind(userId)
+            .all<{ rating: string; count: number }>();
+          const total = (results ?? []).reduce((sum, r) => sum + Number(r.count), 0);
+          const likes = Number((results ?? []).find((r) => r.rating === 'like')?.count ?? 0);
+          const dislikes = Number((results ?? []).find((r) => r.rating === 'dislike')?.count ?? 0);
+          return jsonResponse({
+            success: true,
+            data: { total, likes, dislikes, ratio: total > 0 ? (likes / total * 100).toFixed(1) : '0' },
+          }, 200, request, env);
+        } catch (error) {
+          console.error('Feedback stats error:', error);
+          return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+        }
+      }
+    }
+
+    // ── User Data Sync API ──
+    if (url.pathname === '/api/user-data') {
+      if (!env.DB) {
+        return jsonResponse({ success: false, error: 'Database not configured' }, 500, request, env);
+      }
+      await ensureConversationSchema(env.DB);
+
+      if (request.method === 'POST') {
+        try {
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          const raw = await readJsonBody(request) as Record<string, unknown>;
+          const payload = typeof raw.payload === 'string' ? raw.payload : JSON.stringify(raw.payload ?? {});
+          if (payload.length > 100000) {
+            return jsonResponse({ success: false, error: '数据过大' }, 400, request, env);
+          }
+          await env.DB
+            .prepare(
+              `INSERT INTO user_data (id, user_id, payload, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET payload = ?, updated_at = ?`,
+            )
+            .bind(generateId(), userId, payload, Date.now(), payload, Date.now())
+            .run();
+          return jsonResponse({ success: true, data: { synced: true } }, 200, request, env);
+        } catch (error) {
+          console.error('User data sync error:', error);
+          return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+        }
+      }
+
+      if (request.method === 'GET') {
+        try {
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          await ensureConversationSchema(env.DB);
+          const { results } = await env.DB
+            .prepare(`SELECT payload, updated_at FROM user_data WHERE user_id = ? LIMIT 1`)
+            .bind(userId)
+            .all<{ payload: string; updated_at: number }>();
+          const row = (results ?? [])[0];
+          return jsonResponse({
+            success: true,
+            data: row ? { payload: row.payload, updatedAt: row.updated_at } : null,
+          }, 200, request, env);
+        } catch (error) {
+          console.error('User data fetch error:', error);
+          return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+        }
       }
     }
 
