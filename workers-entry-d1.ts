@@ -44,6 +44,7 @@ const DEFAULT_ALLOWED_ORIGINS = new Set([
 ]);
 
 const MAX_BODY_BYTES = 12_000;
+const MAX_SYNC_BODY_BYTES = 100_000;
 const MAX_MESSAGE_LENGTH = 2_000;
 const MAX_STYLE_LENGTH = 80;
 const MAX_REFINEMENT_CONTENT_LENGTH = 4_000;
@@ -407,6 +408,34 @@ function ensureConversationSchema(db: D1Db): Promise<void> {
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_id ON conversations(user_id)`).bind().run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_session_id ON conversations(session_id)`).bind().run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_created_at ON conversations(created_at DESC)`).bind().run();
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS feedbacks (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          input TEXT,
+          prompt TEXT,
+          shot_index INTEGER DEFAULT 0,
+          rating TEXT CHECK(rating IN ('like', 'dislike')),
+          comment TEXT DEFAULT '',
+          created_at INTEGER
+        )`,
+      )
+      .bind()
+      .run();
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS user_data (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL UNIQUE,
+          payload TEXT,
+          updated_at INTEGER
+        )`,
+      )
+      .bind()
+      .run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedbacks(user_id)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedbacks(rating)`).bind().run();
   })().catch((error) => {
     schemaReadyPromise = undefined;
     throw error;
@@ -629,6 +658,111 @@ export default {
       } catch (error: unknown) {
         const err = error as Error;
         console.error('History error:', err);
+        return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+      }
+    }
+
+    if (url.pathname === '/api/feedback') {
+      try {
+        if (request.method === 'POST') {
+          const body = (await readJsonBody(request)) as Record<string, unknown>;
+          const { input, prompt, shotIndex, rating, comment } = body || {};
+          if (typeof rating !== 'string' || (rating !== 'like' && rating !== 'dislike')) {
+            return jsonResponse({ success: false, error: 'rating must be "like" or "dislike"' }, 400, request, env);
+          }
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          const id = generateId();
+          const now = Date.now();
+          const safeInput = typeof input === 'string' ? input.slice(0, 2000) : '';
+          const safePrompt = typeof prompt === 'string' ? prompt.slice(0, 2000) : '';
+          const safeComment = typeof comment === 'string' ? comment.slice(0, 500) : '';
+          const idx =
+            typeof shotIndex === 'number'
+              ? shotIndex
+              : typeof shotIndex === 'string'
+                ? parseInt(shotIndex, 10) || 0
+                : 0;
+          await env.DB!
+            .prepare(
+              `INSERT INTO feedbacks (id, user_id, input, prompt, shot_index, rating, comment, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .bind(id, userId, safeInput, safePrompt, idx, rating, safeComment, now)
+            .run();
+          return jsonResponse({ success: true, data: { id } }, 200, request, env);
+        }
+        if (request.method === 'GET') {
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          const { results } = await env.DB!
+            .prepare(`SELECT rating, COUNT(*) as count FROM feedbacks WHERE user_id = ? GROUP BY rating`)
+            .bind(userId)
+            .all<{ rating: string; count: number }>();
+          const rows = results ?? [];
+          let likes = 0;
+          let dislikes = 0;
+          for (const row of rows) {
+            if (row.rating === 'like') likes = row.count;
+            else if (row.rating === 'dislike') dislikes = row.count;
+          }
+          const total = likes + dislikes;
+          const ratio = total > 0 ? ((likes / total) * 100).toFixed(1) : '0.0';
+          return jsonResponse({ success: true, data: { total, likes, dislikes, ratio } }, 200, request, env);
+        }
+        return jsonResponse({ success: false, error: 'Method not allowed' }, 405, request, env);
+      } catch (error: unknown) {
+        if (error instanceof Response) {
+          return new Response(error.body, { status: error.status, headers: getCorsHeaders(request, env) });
+        }
+        console.error('Feedback error:', error);
+        return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+      }
+    }
+
+    if (url.pathname === '/api/user-data') {
+      try {
+        if (request.method === 'POST') {
+          const rawText = await request.text();
+          if (new TextEncoder().encode(rawText).byteLength > MAX_SYNC_BODY_BYTES) {
+            return jsonResponse({ success: false, error: '请求体过大' }, 413, request, env);
+          }
+          let body: Record<string, unknown>;
+          try {
+            body = JSON.parse(rawText) as Record<string, unknown>;
+          } catch {
+            return jsonResponse({ success: false, error: 'JSON 格式无效' }, 400, request, env);
+          }
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          const id = generateId();
+          const now = Date.now();
+          const payload = JSON.stringify(body);
+          await env.DB!
+            .prepare(
+              `INSERT INTO user_data (id, user_id, payload, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET payload = ?, updated_at = ?`,
+            )
+            .bind(id, userId, payload, now, payload, now)
+            .run();
+          return jsonResponse({ success: true }, 200, request, env);
+        }
+        if (request.method === 'GET') {
+          const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+          const { results } = await env.DB!
+            .prepare(`SELECT payload, updated_at FROM user_data WHERE user_id = ?`)
+            .bind(userId)
+            .all<{ payload: string; updated_at: number }>();
+          const row = results?.[0] ?? null;
+          if (!row) {
+            return jsonResponse({ success: true, data: null }, 200, request, env);
+          }
+          return jsonResponse({ success: true, data: { payload: row.payload, updatedAt: row.updated_at } }, 200, request, env);
+        }
+        return jsonResponse({ success: false, error: 'Method not allowed' }, 405, request, env);
+      } catch (error: unknown) {
+        if (error instanceof Response) {
+          return new Response(error.body, { status: error.status, headers: getCorsHeaders(request, env) });
+        }
+        console.error('User data error:', error);
         return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
       }
     }
