@@ -482,6 +482,119 @@ async function callDeepSeekChat(
   return content;
 }
 
+function buildDirectorKitSystemPrompt(
+  targetDuration?: string,
+  targetType?: string,
+  platform?: string,
+): string {
+  const durationHint = targetDuration ? `\n- 目标时长：${targetDuration}` : '';
+  const typeHint = targetType ? `\n- 目标类型风格：${targetType}` : '';
+  const platformHint = platform ? `\n- 目标平台：${platform}` : '';
+
+  return `你是一位专业的AI视频导演助手。你需要根据用户的创意描述，生成完整的导演执行包（DirectorKit）。
+
+## 用户参数
+${durationHint}${typeHint}${platformHint}
+
+## 输出要求
+请严格按照以下 JSON 结构输出，不要添加任何额外的解释文字。你的输出必须是一个合法的 JSON 对象，包含以下字段：
+
+{
+  "diagnosis": {
+    "feasibilityScore": 0-100的数字,
+    "keyRisks": ["风险描述字符串数组"],
+    "riskLevel": "low" | "medium" | "high",
+    "suggestedAdjustments": ["调整建议字符串数组"],
+    "recommendedDirection": "推荐方向描述"
+  },
+  "versions": [
+    {
+      "versionType": "safest" | "stylish" | "cinematic",
+      "label": "版本标题",
+      "summary": "版本摘要",
+      "rewrittenIdea": "重写的创意描述",
+      "whyThisWorks": "为什么这个版本有效",
+      "reducedRisks": ["降低的风险列表"],
+      "bestFor": "最适合的场景"
+    }
+  ],
+  "selectedVersion": null,
+  "storySetting": {
+    "logline": "一句核心故事梗概",
+    "directorIntent": "导演意图描述",
+    "protagonist": "主角设定",
+    "worldSetting": "世界观设定",
+    "visualMotif": "视觉母题"
+  },
+  "shotCards": [
+    {
+      "shotId": 镜头编号数字,
+      "duration": "时长描述（如3s）",
+      "purpose": "镜头目的",
+      "framing": "景别（如特写/中景/全景）",
+      "description": "画面描述",
+      "action": "动作描述",
+      "mood": "情绪氛围",
+      "motion": "运镜方式",
+      "generationMode": "text-to-video" | "image-to-video" | "reference-image",
+      "consistencyNeed": "low" | "medium" | "high",
+      "riskLevel": "low" | "medium" | "high",
+      "riskTags": ["风险标签"],
+      "fixSuggestion": "补救建议"
+    }
+  ],
+  "masterPrompt": "完整的主prompt文本",
+  "negativePrompt": "负面提示词",
+  "platformAdvice": [
+    {
+      "platform": "平台名称",
+      "note": "使用说明",
+      "recommended": true或false
+    }
+  ],
+  "postProductionAdvice": {
+    "editingRhythm": "剪辑节奏建议",
+    "soundEffects": ["音效列表"],
+    "music": "配乐建议",
+    "subtitles": "字幕建议"
+  },
+  "riskRemediation": {
+    "topRisks": ["前3风险"],
+    "alternativeShots": ["替代方案"],
+    "backupStrategies": ["备用策略"]
+  }
+}
+
+## 注意事项
+1. shotCards 数组长度应根据创意复杂度和目标时长合理确定（15秒约3-5个镜头，30秒约5-8个镜头，60秒约8-12个镜头）
+2. versions 数组必须包含3个版本，分别对应 safest（保守）、stylish（风格化）、cinematic（电影感）
+3. selectedVersion 固定为 null
+4. diagnosis.feasibilityScore 请基于创意清晰度、可实现性、风险度综合评分，0-100之间
+5. 所有文本字段使用中文`;
+}
+
+function parseDirectorKitResponse(raw: string): Record<string, unknown> {
+  // Try to extract JSON from markdown code block first
+  const jsonBlockMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonStr = jsonBlockMatch?.[1]?.trim() ?? raw.trim();
+
+  const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+
+  // Validate required fields
+  const requiredFields = [
+    'diagnosis', 'versions', 'selectedVersion', 'storySetting',
+    'shotCards', 'masterPrompt', 'negativePrompt',
+    'platformAdvice', 'postProductionAdvice', 'riskRemediation',
+  ];
+  for (const field of requiredFields) {
+    if (!(field in parsed)) {
+      throw new Error(`Missing required field: ${field}`);
+    }
+  }
+
+  return parsed;
+}
+
 export default {
   async fetch(
     request: Request,
@@ -658,6 +771,99 @@ export default {
       } catch (error: unknown) {
         const err = error as Error;
         console.error('History error:', err);
+        return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+      }
+    }
+
+    if (url.pathname === '/api/v2/director-kit') {
+      if (request.method !== 'POST') {
+        return jsonResponse({ success: false, error: 'Method not allowed' }, 405, request, env);
+      }
+      try {
+        const body = (await readJsonBody(request)) as Record<string, unknown>;
+        const message = typeof body?.message === 'string' ? body.message.trim() : '';
+        if (!message) {
+          return jsonResponse({ success: false, error: '请提供有效的 message 字段' }, 400, request, env);
+        }
+        if (message.length > MAX_MESSAGE_LENGTH) {
+          return jsonResponse(
+            { success: false, error: `message 不能超过 ${MAX_MESSAGE_LENGTH} 个字符` },
+            400,
+            request,
+            env,
+          );
+        }
+
+        const validDurations = ['15s', '30s', '60s'];
+        const validTypes = ['wasteland', 'cyberpunk', 'black-humor', 'thriller', 'custom'];
+        const validPlatforms = ['seedance', 'kling', 'runway', 'general'];
+
+        const targetDuration =
+          typeof body.targetDuration === 'string' && validDurations.includes(body.targetDuration)
+            ? body.targetDuration
+            : undefined;
+        const targetType =
+          typeof body.targetType === 'string' && validTypes.includes(body.targetType)
+            ? body.targetType
+            : undefined;
+        const platform =
+          typeof body.platform === 'string' && validPlatforms.includes(body.platform)
+            ? body.platform
+            : undefined;
+
+        const llmApiKey = resolveDeepSeekApiKey(env.DEEPSEEK_API_KEY ?? env.OPENAI_API_KEY);
+        if (!llmApiKey) {
+          return jsonResponse({ success: false, error: '模型服务未配置' }, 500, request, env);
+        }
+
+        const systemPrompt = buildDirectorKitSystemPrompt(targetDuration, targetType, platform);
+
+        const userParts: string[] = ['## 用户创意', message];
+        if (targetDuration) userParts.push(`\n目标时长：${targetDuration}`);
+        if (targetType) userParts.push(`\n目标类型：${targetType}`);
+        if (platform) userParts.push(`\n目标平台：${platform}`);
+        const userContent = userParts.join('\n');
+
+        const responseText = await callDeepSeekChat(llmApiKey, [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ]);
+
+        let directorKit: Record<string, unknown>;
+        try {
+          directorKit = parseDirectorKitResponse(responseText);
+        } catch (parseError) {
+          console.error('DirectorKit parse failed:', parseError);
+          return jsonResponse(
+            {
+              success: false,
+              error: '模型返回格式无效，请重试',
+              ...(isDebugEnabled(env) ? { raw: responseText } : {}),
+            },
+            502,
+            request,
+            env,
+          );
+        }
+
+        return jsonResponse(
+          {
+            success: true,
+            data: directorKit,
+          },
+          200,
+          request,
+          env,
+        );
+      } catch (error: unknown) {
+        if (error instanceof Response) {
+          return new Response(error.body, {
+            status: error.status,
+            headers: getCorsHeaders(request, env),
+          });
+        }
+        const err = error as Error;
+        console.error('DirectorKit error:', err);
         return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
       }
     }
