@@ -10,6 +10,12 @@ import {
 } from './src/mastra/agents/build-user-message';
 import { parseOptimizationOutputV3, type V3OptimizationOutput } from './src/mastra/schemas/optimization-output';
 import {
+  directorKitPlatforms,
+  directorKitTargetDurations,
+  directorKitTargetTypes,
+  parseDirectorKitOutput,
+} from './src/mastra/schemas/director-kit';
+import {
   DEEPSEEK_BASE_URL,
   DEEPSEEK_MODEL_NAME,
   resolveDeepSeekApiKey,
@@ -573,28 +579,6 @@ ${durationHint}${typeHint}${platformHint}
 5. 所有文本字段使用中文`;
 }
 
-function parseDirectorKitResponse(raw: string): Record<string, unknown> {
-  // Try to extract JSON from markdown code block first
-  const jsonBlockMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonStr = jsonBlockMatch?.[1]?.trim() ?? raw.trim();
-
-  const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-
-  // Validate required fields
-  const requiredFields = [
-    'diagnosis', 'versions', 'selectedVersion', 'storySetting',
-    'shotCards', 'masterPrompt', 'negativePrompt',
-    'platformAdvice', 'postProductionAdvice', 'riskRemediation',
-  ];
-  for (const field of requiredFields) {
-    if (!(field in parsed)) {
-      throw new Error(`Missing required field: ${field}`);
-    }
-  }
-
-  return parsed;
-}
-
 export default {
   async fetch(
     request: Request,
@@ -793,31 +777,19 @@ export default {
           );
         }
 
-        const validDurations = ['15s', '30s', '60s', '90s'];
-        const validTypes = [
-          'wasteland',
-          'ancient',
-          'cyberpunk',
-          'wuxia',
-          'thriller',
-          'romance',
-          'scifi',
-          'comedy',
-          'black-humor',
-          'custom',
-        ];
-        const validPlatforms = ['seedance', 'kling', 'runway', 'general'];
-
         const targetDuration =
-          typeof body.targetDuration === 'string' && validDurations.includes(body.targetDuration)
+          typeof body.targetDuration === 'string' &&
+          directorKitTargetDurations.includes(body.targetDuration as (typeof directorKitTargetDurations)[number])
             ? body.targetDuration
             : undefined;
         const targetType =
-          typeof body.targetType === 'string' && validTypes.includes(body.targetType)
+          typeof body.targetType === 'string' &&
+          directorKitTargetTypes.includes(body.targetType as (typeof directorKitTargetTypes)[number])
             ? body.targetType
             : undefined;
         const platform =
-          typeof body.platform === 'string' && validPlatforms.includes(body.platform)
+          typeof body.platform === 'string' &&
+          directorKitPlatforms.includes(body.platform as (typeof directorKitPlatforms)[number])
             ? body.platform
             : undefined;
 
@@ -841,7 +813,7 @@ export default {
 
         let directorKit: Record<string, unknown>;
         try {
-          directorKit = parseDirectorKitResponse(responseText);
+          directorKit = parseDirectorKitOutput(responseText);
         } catch (parseError) {
           console.error('DirectorKit parse failed:', parseError);
           return jsonResponse(

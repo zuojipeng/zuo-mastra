@@ -6,6 +6,7 @@
     "src/mastra/agents/build-user-message.ts",
     "src/mastra/agents/video-prompt-knowledge.ts",
     "src/mastra/llm/model-config.ts",
+    "src/mastra/schemas/director-kit.ts",
     "src/mastra/schemas/optimization-output.ts"
   ]
 }
