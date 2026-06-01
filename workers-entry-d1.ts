@@ -621,8 +621,7 @@ export default {
       try {
         const body = normalizeOptimizeBody(await readJsonBody(request));
         const { message, scenario, style, projectBible, refinement, shotCount } = body;
-        const shotCountValue: number =
-          shotCount ?? 1;
+        const shotCountValue = shotCount ?? 1;
         const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
         const sessionId = sanitizeHeaderId(request.headers.get('X-Session-Id'), generateId());
         const rateLimitKey = `${getClientIp(request)}:${userId}`;
@@ -666,8 +665,8 @@ export default {
         });
 
         const userContent = buildUserMessage({ message, scenario, style, projectBible, refinement });
-        const shotHint = shotCount > 1
-          ? `\n\n[硬性要求：你必须生成 ${shotCount} 个镜头，一个不能少]\n请严格按照以下JSON格式输出，prompts数组必须有 ${shotCount} 个元素：\n{"prompts": ["镜头1画面描述...", "镜头2画面描述...", ...共${shotCount}个]}
+        const shotHint = shotCountValue > 1
+          ? `\n\n[硬性要求：你必须生成 ${shotCountValue} 个镜头，一个不能少]\n请严格按照以下JSON格式输出，prompts数组必须有 ${shotCountValue} 个元素：\n{"prompts": ["镜头1画面描述...", "镜头2画面描述...", ...共${shotCountValue}个]}
 `
           : '';
         messages.push({ role: 'user', content: `${userContent}${shotHint}` });
@@ -794,8 +793,19 @@ export default {
           );
         }
 
-        const validDurations = ['15s', '30s', '60s'];
-        const validTypes = ['wasteland', 'cyberpunk', 'black-humor', 'thriller', 'custom'];
+        const validDurations = ['15s', '30s', '60s', '90s'];
+        const validTypes = [
+          'wasteland',
+          'ancient',
+          'cyberpunk',
+          'wuxia',
+          'thriller',
+          'romance',
+          'scifi',
+          'comedy',
+          'black-humor',
+          'custom',
+        ];
         const validPlatforms = ['seedance', 'kling', 'runway', 'general'];
 
         const targetDuration =
