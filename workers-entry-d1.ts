@@ -18,6 +18,8 @@ import {
 import {
   DEEPSEEK_BASE_URL,
   DEEPSEEK_MODEL_NAME,
+  OPENAI_BASE_URL,
+  OPENAI_MODEL_NAME,
   resolveDeepSeekApiKey,
 } from './src/mastra/llm/model-config';
 
@@ -33,11 +35,15 @@ type D1Db = {
 type Env = {
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+  OPENAI_MODEL_NAME?: string;
   DB?: D1Db;
   API_KEY?: string;
   ALLOWED_ORIGINS?: string;
   DEBUG_ERRORS?: string;
 };
+
+type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   'https://prompt-optimizer-frontend.pages.dev',
@@ -480,16 +486,53 @@ function ensureConversationSchema(db: D1Db): Promise<void> {
 
 async function callDeepSeekChat(
   apiKey: string,
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+  messages: ChatMessage[],
 ): Promise<string> {
-  const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+  return callJsonChatCompletion({
+    providerName: 'DeepSeek',
+    apiKey,
+    baseUrl: DEEPSEEK_BASE_URL,
+    modelName: DEEPSEEK_MODEL_NAME,
+    messages,
+  });
+}
+
+async function callOpenAIChat(
+  apiKey: string,
+  messages: ChatMessage[],
+  modelName = OPENAI_MODEL_NAME,
+  baseUrl = OPENAI_BASE_URL,
+): Promise<string> {
+  return callJsonChatCompletion({
+    providerName: 'OpenAI',
+    apiKey,
+    baseUrl,
+    modelName,
+    messages,
+  });
+}
+
+async function callJsonChatCompletion({
+  providerName,
+  apiKey,
+  baseUrl,
+  modelName,
+  messages,
+}: {
+  providerName: string;
+  apiKey: string;
+  baseUrl: string;
+  modelName: string;
+  messages: ChatMessage[];
+}): Promise<string> {
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: DEEPSEEK_MODEL_NAME,
+      model: modelName,
       messages,
       temperature: 0,
       max_tokens: 5000,
@@ -505,15 +548,42 @@ async function callDeepSeekChat(
     | null;
 
   if (!response.ok) {
-    throw new UpstreamModelError(data?.error?.message ?? `DeepSeek API error: ${response.status}`, response.status);
+    throw new UpstreamModelError(data?.error?.message ?? `${providerName} API error: ${response.status}`, response.status);
   }
 
   const content = data?.choices?.[0]?.message?.content;
   if (!content) {
-    throw new UpstreamModelError('DeepSeek response missing message content', response.status);
+    throw new UpstreamModelError(`${providerName} response missing message content`, response.status);
   }
 
   return content;
+}
+
+function shouldFallbackToOpenAI(error: UpstreamModelError): boolean {
+  return [401, 402, 403, 429, 500, 502, 503, 504].includes(error.upstreamStatus);
+}
+
+async function callModelWithFallback(env: Env, messages: ChatMessage[]): Promise<string> {
+  const deepSeekKey = resolveDeepSeekApiKey(env.DEEPSEEK_API_KEY);
+  const openAIKey = env.OPENAI_API_KEY?.trim();
+
+  if (deepSeekKey) {
+    try {
+      return await callDeepSeekChat(deepSeekKey, messages);
+    } catch (error) {
+      if (error instanceof UpstreamModelError && openAIKey && shouldFallbackToOpenAI(error)) {
+        console.warn(`DeepSeek failed with ${error.upstreamStatus}; falling back to OpenAI.`);
+        return callOpenAIChat(openAIKey, messages, env.OPENAI_MODEL_NAME ?? OPENAI_MODEL_NAME, env.OPENAI_BASE_URL ?? OPENAI_BASE_URL);
+      }
+      throw error;
+    }
+  }
+
+  if (openAIKey) {
+    return callOpenAIChat(openAIKey, messages, env.OPENAI_MODEL_NAME ?? OPENAI_MODEL_NAME, env.OPENAI_BASE_URL ?? OPENAI_BASE_URL);
+  }
+
+  throw new UpstreamModelError('Model service is not configured', 500);
 }
 
 function buildDirectorKitSystemPrompt(
@@ -647,12 +717,13 @@ export default {
           );
         }
 
-        const llmApiKey = resolveDeepSeekApiKey(env.DEEPSEEK_API_KEY ?? env.OPENAI_API_KEY);
-        if (!llmApiKey) {
+        if (!env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) {
           return jsonResponse({ success: false, error: '模型服务未配置' }, 500, request, env);
         }
 
-        process.env.DEEPSEEK_API_KEY = llmApiKey;
+        if (env.DEEPSEEK_API_KEY) {
+          process.env.DEEPSEEK_API_KEY = env.DEEPSEEK_API_KEY;
+        }
 
         let conversationHistory: Awaited<ReturnType<typeof getConversationHistory>> = [];
         if (env.DB) {
@@ -683,7 +754,7 @@ export default {
           : '';
         messages.push({ role: 'user', content: `${userContent}${shotHint}` });
 
-        const responseText = await callDeepSeekChat(llmApiKey, messages);
+        const responseText = await callModelWithFallback(env, messages);
         let structured: V3OptimizationOutput;
 
         try {
@@ -824,8 +895,7 @@ export default {
             ? body.platform
             : undefined;
 
-        const llmApiKey = resolveDeepSeekApiKey(env.DEEPSEEK_API_KEY ?? env.OPENAI_API_KEY);
-        if (!llmApiKey) {
+        if (!env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) {
           return jsonResponse({ success: false, error: '模型服务未配置' }, 500, request, env);
         }
 
@@ -837,7 +907,7 @@ export default {
         if (platform) userParts.push(`\n目标平台：${platform}`);
         const userContent = userParts.join('\n');
 
-        const responseText = await callDeepSeekChat(llmApiKey, [
+        const responseText = await callModelWithFallback(env, [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
         ]);

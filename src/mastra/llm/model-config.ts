@@ -7,8 +7,14 @@ export const DEEPSEEK_MODEL_ROUTER_ID = 'deepseek/deepseek-chat';
 /** 实际调用的模型名 */
 export const DEEPSEEK_MODEL_NAME = 'deepseek-chat';
 
+/** OpenAI fallback API */
+export const OPENAI_BASE_URL = 'https://api.openai.com';
+
+/** OpenAI fallback model for JSON text generation */
+export const OPENAI_MODEL_NAME = 'gpt-4.1-mini';
+
 export function resolveDeepSeekApiKey(explicit?: string): string | undefined {
-  return explicit ?? process.env.DEEPSEEK_API_KEY ?? process.env.OPENAI_API_KEY;
+  return explicit ?? process.env.DEEPSEEK_API_KEY;
 }
 
 export function getDeepSeekModelConfig(apiKey?: string): {
