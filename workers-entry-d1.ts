@@ -299,6 +299,34 @@ function isDebugEnabled(env: Env): boolean {
   return env.DEBUG_ERRORS === 'true';
 }
 
+class UpstreamModelError extends Error {
+  upstreamStatus: number;
+
+  constructor(message: string, upstreamStatus: number) {
+    super(message);
+    this.name = 'UpstreamModelError';
+    this.upstreamStatus = upstreamStatus;
+  }
+}
+
+function upstreamModelErrorResponse(error: UpstreamModelError, request: Request, env: Env): Response {
+  return jsonResponse(
+    {
+      success: false,
+      error: '模型服务调用失败，请稍后重试',
+      ...(isDebugEnabled(env)
+        ? {
+            upstreamStatus: error.upstreamStatus,
+            upstreamError: error.message,
+          }
+        : {}),
+    },
+    502,
+    request,
+    env,
+  );
+}
+
 function includesText(haystack: string, needle: string): boolean {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
@@ -477,12 +505,12 @@ async function callDeepSeekChat(
     | null;
 
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? `DeepSeek API error: ${response.status}`);
+    throw new UpstreamModelError(data?.error?.message ?? `DeepSeek API error: ${response.status}`, response.status);
   }
 
   const content = data?.choices?.[0]?.message?.content;
   if (!content) {
-    throw new Error('DeepSeek response missing message content');
+    throw new UpstreamModelError('DeepSeek response missing message content', response.status);
   }
 
   return content;
@@ -725,6 +753,9 @@ export default {
         }
         const err = error as Error;
         console.error('Agent error:', err);
+        if (err instanceof UpstreamModelError) {
+          return upstreamModelErrorResponse(err, request, env);
+        }
         return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
       }
     }
@@ -846,6 +877,9 @@ export default {
         }
         const err = error as Error;
         console.error('DirectorKit error:', err);
+        if (err instanceof UpstreamModelError) {
+          return upstreamModelErrorResponse(err, request, env);
+        }
         return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
       }
     }
