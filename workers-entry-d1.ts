@@ -333,6 +333,35 @@ function upstreamModelErrorResponse(error: UpstreamModelError, request: Request,
   );
 }
 
+function sanitizeString(value: unknown, maxLength: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function sanitizeStringArray(value: unknown, maxItems: number, maxItemLength: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .slice(0, maxItems)
+    .map((item) => item.trim().slice(0, maxItemLength));
+}
+
+function parseJsonArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function countItems(items: string[]): Record<string, number> {
+  return items.reduce<Record<string, number>>((acc, item) => {
+    acc[item] = (acc[item] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
 function includesText(haystack: string, needle: string): boolean {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
@@ -458,11 +487,38 @@ function ensureConversationSchema(db: D1Db): Promise<void> {
           shot_index INTEGER DEFAULT 0,
           rating TEXT CHECK(rating IN ('like', 'dislike')),
           comment TEXT DEFAULT '',
+          event_type TEXT DEFAULT 'legacy_prompt',
+          source TEXT DEFAULT 'v1',
+          director_kit_id TEXT DEFAULT '',
+          target_duration TEXT DEFAULT '',
+          target_type TEXT DEFAULT '',
+          selected_version_type TEXT DEFAULT '',
+          platform TEXT DEFAULT '',
+          generation_mode TEXT DEFAULT '',
+          risk_level TEXT DEFAULT '',
+          risk_tags TEXT DEFAULT '[]',
+          failure_reasons TEXT DEFAULT '[]',
           created_at INTEGER
         )`,
       )
       .bind()
       .run();
+    const feedbackColumns = [
+      ['event_type', "TEXT DEFAULT 'legacy_prompt'"],
+      ['source', "TEXT DEFAULT 'v1'"],
+      ['director_kit_id', "TEXT DEFAULT ''"],
+      ['target_duration', "TEXT DEFAULT ''"],
+      ['target_type', "TEXT DEFAULT ''"],
+      ['selected_version_type', "TEXT DEFAULT ''"],
+      ['platform', "TEXT DEFAULT ''"],
+      ['generation_mode', "TEXT DEFAULT ''"],
+      ['risk_level', "TEXT DEFAULT ''"],
+      ['risk_tags', "TEXT DEFAULT '[]'"],
+      ['failure_reasons', "TEXT DEFAULT '[]'"],
+    ] as const;
+    for (const [column, definition] of feedbackColumns) {
+      await db.prepare(`ALTER TABLE feedbacks ADD COLUMN ${column} ${definition}`).bind().run().catch(() => {});
+    }
     await db
       .prepare(
         `CREATE TABLE IF NOT EXISTS user_data (
@@ -476,6 +532,9 @@ function ensureConversationSchema(db: D1Db): Promise<void> {
       .run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedbacks(user_id)`).bind().run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedbacks(rating)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_event_type ON feedbacks(event_type)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_platform ON feedbacks(platform)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_target_type ON feedbacks(target_type)`).bind().run();
   })().catch((error) => {
     schemaReadyPromise = undefined;
     throw error;
@@ -981,9 +1040,20 @@ export default {
           const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
           const id = generateId();
           const now = Date.now();
-          const safeInput = typeof input === 'string' ? input.slice(0, 2000) : '';
-          const safePrompt = typeof prompt === 'string' ? prompt.slice(0, 2000) : '';
-          const safeComment = typeof comment === 'string' ? comment.slice(0, 500) : '';
+          const safeInput = sanitizeString(input, 2000);
+          const safePrompt = sanitizeString(prompt, 4000);
+          const safeComment = sanitizeString(comment, 500);
+          const eventType = sanitizeString(body.eventType, 80) || 'legacy_prompt';
+          const source = sanitizeString(body.source, 40) || 'v1';
+          const directorKitId = sanitizeString(body.directorKitId, 160);
+          const targetDuration = sanitizeString(body.targetDuration, 20);
+          const targetType = sanitizeString(body.targetType, 80);
+          const selectedVersionType = sanitizeString(body.selectedVersionType, 40);
+          const platform = sanitizeString(body.platform, 80);
+          const generationMode = sanitizeString(body.generationMode, 40);
+          const riskLevel = sanitizeString(body.riskLevel, 20);
+          const riskTags = sanitizeStringArray(body.riskTags, 20, 80);
+          const failureReasons = sanitizeStringArray(body.failureReasons, 20, 120);
           const idx =
             typeof shotIndex === 'number'
               ? shotIndex
@@ -992,10 +1062,35 @@ export default {
                 : 0;
           await env.DB!
             .prepare(
-              `INSERT INTO feedbacks (id, user_id, input, prompt, shot_index, rating, comment, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO feedbacks (
+                id, user_id, input, prompt, shot_index, rating, comment,
+                event_type, source, director_kit_id, target_duration, target_type,
+                selected_version_type, platform, generation_mode, risk_level,
+                risk_tags, failure_reasons, created_at
+              )
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
-            .bind(id, userId, safeInput, safePrompt, idx, rating, safeComment, now)
+            .bind(
+              id,
+              userId,
+              safeInput,
+              safePrompt,
+              idx,
+              rating,
+              safeComment,
+              eventType,
+              source,
+              directorKitId,
+              targetDuration,
+              targetType,
+              selectedVersionType,
+              platform,
+              generationMode,
+              riskLevel,
+              JSON.stringify(riskTags),
+              JSON.stringify(failureReasons),
+              now,
+            )
             .run();
           return jsonResponse({ success: true, data: { id } }, 200, request, env);
         }
@@ -1012,9 +1107,49 @@ export default {
             if (row.rating === 'like') likes = row.count;
             else if (row.rating === 'dislike') dislikes = row.count;
           }
+          const breakdown = await env.DB!
+            .prepare(
+              `SELECT event_type, source, target_type, platform, generation_mode, risk_level, risk_tags, failure_reasons
+               FROM feedbacks WHERE user_id = ? ORDER BY created_at DESC LIMIT 200`,
+            )
+            .bind(userId)
+            .all<{
+              event_type?: string;
+              source?: string;
+              target_type?: string;
+              platform?: string;
+              generation_mode?: string;
+              risk_level?: string;
+              risk_tags?: string;
+              failure_reasons?: string;
+            }>();
+          const breakdownRows = breakdown.results ?? [];
           const total = likes + dislikes;
           const ratio = total > 0 ? ((likes / total) * 100).toFixed(1) : '0.0';
-          return jsonResponse({ success: true, data: { total, likes, dislikes, ratio } }, 200, request, env);
+          return jsonResponse(
+            {
+              success: true,
+              data: {
+                total,
+                likes,
+                dislikes,
+                ratio,
+                breakdown: {
+                  eventTypes: countItems(breakdownRows.map((row) => row.event_type ?? '').filter(Boolean)),
+                  sources: countItems(breakdownRows.map((row) => row.source ?? '').filter(Boolean)),
+                  targetTypes: countItems(breakdownRows.map((row) => row.target_type ?? '').filter(Boolean)),
+                  platforms: countItems(breakdownRows.map((row) => row.platform ?? '').filter(Boolean)),
+                  generationModes: countItems(breakdownRows.map((row) => row.generation_mode ?? '').filter(Boolean)),
+                  riskLevels: countItems(breakdownRows.map((row) => row.risk_level ?? '').filter(Boolean)),
+                  riskTags: countItems(breakdownRows.flatMap((row) => parseJsonArray(row.risk_tags))),
+                  failureReasons: countItems(breakdownRows.flatMap((row) => parseJsonArray(row.failure_reasons))),
+                },
+              },
+            },
+            200,
+            request,
+            env,
+          );
         }
         return jsonResponse({ success: false, error: 'Method not allowed' }, 405, request, env);
       } catch (error: unknown) {
