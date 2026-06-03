@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.worker.json",
+    "check:models": "node scripts/check-model-providers.mjs",
     "test": "npm run check",
     "dev": "mastra dev",
     "build": "mastra build",
