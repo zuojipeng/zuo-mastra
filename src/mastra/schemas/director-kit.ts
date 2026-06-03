@@ -48,6 +48,17 @@ export const shotCardSchema = z.object({
   consistencyNeed: z.enum(['low', 'medium', 'high']),
   riskLevel: z.enum(['low', 'medium', 'high']),
   riskTags: z.array(z.string()),
+  riskTagDetails: z
+    .array(
+      z.object({
+        tag: z.string(),
+        impact: z.string(),
+        mitigation: z.string(),
+      }),
+    )
+    .optional()
+    .default([]),
+  stabilityChecklist: z.array(z.string()).optional().default([]),
   fixSuggestion: z.string(),
 });
 
@@ -70,6 +81,10 @@ export const directorKitSchema = z.object({
       platform: z.string(),
       note: z.string(),
       recommended: z.boolean(),
+      bestFor: z.string().optional().default(''),
+      promptTips: z.array(z.string()).optional().default([]),
+      settings: z.array(z.string()).optional().default([]),
+      avoid: z.array(z.string()).optional().default([]),
     }),
   ),
   postProductionAdvice: z.object({

@@ -644,6 +644,14 @@ ${durationHint}${typeHint}${platformHint}
       "consistencyNeed": "low" | "medium" | "high",
       "riskLevel": "low" | "medium" | "high",
       "riskTags": ["风险标签"],
+      "riskTagDetails": [
+        {
+          "tag": "风险标签",
+          "impact": "这个风险会如何影响出片",
+          "mitigation": "具体规避动作"
+        }
+      ],
+      "stabilityChecklist": ["这一镜生成前必须检查的稳定性要点"],
       "fixSuggestion": "补救建议"
     }
   ],
@@ -653,7 +661,11 @@ ${durationHint}${typeHint}${platformHint}
     {
       "platform": "平台名称",
       "note": "使用说明",
-      "recommended": true或false
+      "recommended": true或false,
+      "bestFor": "最适合该平台执行的镜头/生成方式",
+      "promptTips": ["投喂该平台时的prompt写法建议"],
+      "settings": ["推荐参数或操作设置，如时长、参考图、镜头运动强度"],
+      "avoid": ["该平台上应避免的表达或动作"]
     }
   ],
   "postProductionAdvice": {
@@ -674,7 +686,11 @@ ${durationHint}${typeHint}${platformHint}
 2. versions 数组必须包含3个版本，分别对应 safest（保守）、stylish（风格化）、cinematic（电影感）
 3. selectedVersion 固定为 null
 4. diagnosis.feasibilityScore 请基于创意清晰度、可实现性、风险度综合评分，0-100之间
-5. 所有文本字段使用中文`;
+5. 所有文本字段使用中文
+6. riskTags 只能使用清晰的生产风险标签，例如：主体一致性、口型风险、多人物调度、复杂动作、快速运镜、文字水印、风格漂移、物体形变、场景跳变、光影不稳定
+7. riskTagDetails 必须解释每个高价值风险标签的影响和规避动作，不要只重复标签
+8. stabilityChecklist 必须是用户生成该镜头前能逐项检查的动作清单
+9. platformAdvice 不能只写泛泛说明，必须给出 bestFor、promptTips、settings 和 avoid`;
 }
 
 export default {
