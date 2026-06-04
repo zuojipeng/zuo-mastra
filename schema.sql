@@ -20,3 +20,32 @@ CREATE INDEX IF NOT EXISTS idx_session_id ON conversations(session_id);
 -- 索引：按时间排序
 CREATE INDEX IF NOT EXISTS idx_created_at ON conversations(created_at DESC);
 
+-- 反馈表：用于 V1/V2 提示词反馈、DirectorKit 反馈和反馈洞察
+CREATE TABLE IF NOT EXISTS feedbacks (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  input TEXT,
+  prompt TEXT,
+  shot_index INTEGER,
+  rating TEXT NOT NULL CHECK (rating IN ('like', 'dislike')),
+  comment TEXT,
+  event_type TEXT DEFAULT 'legacy_prompt',
+  source TEXT DEFAULT 'v1',
+  director_kit_id TEXT,
+  target_duration TEXT,
+  target_type TEXT,
+  selected_version_type TEXT,
+  platform TEXT,
+  generation_mode TEXT,
+  risk_level TEXT,
+  risk_tags TEXT,
+  failure_reasons TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedbacks(user_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedbacks(rating);
+CREATE INDEX IF NOT EXISTS idx_feedback_event_type ON feedbacks(event_type);
+CREATE INDEX IF NOT EXISTS idx_feedback_platform ON feedbacks(platform);
+CREATE INDEX IF NOT EXISTS idx_feedback_target_type ON feedbacks(target_type);
+CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedbacks(created_at DESC);

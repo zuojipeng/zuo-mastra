@@ -362,6 +362,71 @@ function countItems(items: string[]): Record<string, number> {
   }, {});
 }
 
+type FeedbackAnalyticsRow = {
+  rating?: string;
+  event_type?: string;
+  source?: string;
+  target_type?: string;
+  platform?: string;
+  generation_mode?: string;
+  risk_level?: string;
+  risk_tags?: string;
+  failure_reasons?: string;
+  input?: string;
+  prompt?: string;
+  shot_index?: number;
+  comment?: string;
+  created_at?: number;
+};
+
+type FeedbackAnalyticsBucket = {
+  key: string;
+  total: number;
+  likes: number;
+  dislikes: number;
+  dislikeRate: number;
+};
+
+function parseAnalyticsDays(value: string | null): 7 | 30 | 90 {
+  return value === '7' || value === '90' ? Number(value) as 7 | 90 : 30;
+}
+
+function parseAnalyticsLimit(value: string | null): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  if (!Number.isFinite(parsed)) return 10;
+  return Math.min(Math.max(parsed, 1), 50);
+}
+
+function sanitizeAnalyticsFilter(value: string | null, allowed: Set<string>): string {
+  return value && allowed.has(value) ? value : '';
+}
+
+function buildFeedbackAnalyticsBuckets(
+  rows: FeedbackAnalyticsRow[],
+  getValues: (row: FeedbackAnalyticsRow) => string[],
+  limit: number,
+): FeedbackAnalyticsBucket[] {
+  const buckets = new Map<string, FeedbackAnalyticsBucket>();
+  for (const row of rows) {
+    const rating = row.rating === 'like' ? 'likes' : row.rating === 'dislike' ? 'dislikes' : null;
+    if (!rating) continue;
+    for (const value of getValues(row).filter(Boolean)) {
+      const current = buckets.get(value) ?? { key: value, total: 0, likes: 0, dislikes: 0, dislikeRate: 0 };
+      current.total += 1;
+      current[rating] += 1;
+      buckets.set(value, current);
+    }
+  }
+
+  return Array.from(buckets.values())
+    .map((bucket) => ({
+      ...bucket,
+      dislikeRate: bucket.total > 0 ? Number(((bucket.dislikes / bucket.total) * 100).toFixed(1)) : 0,
+    }))
+    .sort((a, b) => b.dislikes - a.dislikes || b.total - a.total || a.key.localeCompare(b.key))
+    .slice(0, limit);
+}
+
 function includesText(haystack: string, needle: string): boolean {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
@@ -1025,6 +1090,114 @@ export default {
         if (err instanceof UpstreamModelError) {
           return upstreamModelErrorResponse(err, request, env);
         }
+        return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+      }
+    }
+
+    if (url.pathname === '/api/feedback/analytics') {
+      try {
+        if (request.method !== 'GET') {
+          return jsonResponse({ success: false, error: 'Method not allowed' }, 405, request, env);
+        }
+
+        const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+        const days = parseAnalyticsDays(url.searchParams.get('days'));
+        const limit = parseAnalyticsLimit(url.searchParams.get('limit'));
+        const eventType = sanitizeAnalyticsFilter(
+          url.searchParams.get('eventType'),
+          new Set(['director_kit', 'shot_card', 'platform_advice', 'legacy_prompt']),
+        );
+        const source = sanitizeAnalyticsFilter(url.searchParams.get('source'), new Set(['v1', 'v2']));
+        const since = Date.now() - days * 24 * 60 * 60 * 1000;
+        const where = ['user_id = ?', 'created_at >= ?'];
+        const bindings: unknown[] = [userId, since];
+        if (eventType) {
+          where.push('event_type = ?');
+          bindings.push(eventType);
+        }
+        if (source) {
+          where.push('source = ?');
+          bindings.push(source);
+        }
+
+        const { results } = await env.DB!
+          .prepare(
+            `SELECT rating, event_type, source, target_type, platform, generation_mode, risk_level,
+                    risk_tags, failure_reasons, input, prompt, shot_index, comment, created_at
+             FROM feedbacks
+             WHERE ${where.join(' AND ')}
+             ORDER BY created_at DESC
+             LIMIT 500`,
+          )
+          .bind(...bindings)
+          .all<FeedbackAnalyticsRow>();
+
+        const analyticsRows = results ?? [];
+        const total = analyticsRows.length;
+        const likes = analyticsRows.filter((row) => row.rating === 'like').length;
+        const dislikes = analyticsRows.filter((row) => row.rating === 'dislike').length;
+        const v2Count = analyticsRows.filter((row) => row.source === 'v2').length;
+        const minSampleSize = 5;
+        const qualityFlags = [
+          total < minSampleSize ? `样本量低于 ${minSampleSize}，结论仅作观察` : '',
+          analyticsRows.some((row) => !row.source || row.source === 'v1') ? '包含旧版反馈，V2 结论需过滤 source=v2' : '',
+          analyticsRows.some((row) => !row.event_type) ? '部分反馈缺少 eventType' : '',
+        ].filter(Boolean);
+        const highValueSamples = analyticsRows
+          .filter((row) => row.rating === 'dislike')
+          .slice(0, limit)
+          .map((row) => ({
+            eventType: row.event_type ?? '',
+            targetType: row.target_type ?? '',
+            platform: row.platform ?? '',
+            generationMode: row.generation_mode ?? '',
+            riskLevel: row.risk_level ?? '',
+            riskTags: parseJsonArray(row.risk_tags),
+            failureReasons: parseJsonArray(row.failure_reasons),
+            input: sanitizeString(row.input, 240),
+            prompt: sanitizeString(row.prompt, 320),
+            shotIndex: row.shot_index ?? 0,
+            comment: sanitizeString(row.comment, 160),
+            createdAt: row.created_at ?? 0,
+          }));
+
+        return jsonResponse(
+          {
+            success: true,
+            data: {
+              windowDays: days,
+              total,
+              likes,
+              dislikes,
+              dislikeRate: total > 0 ? Number(((dislikes / total) * 100).toFixed(1)) : 0,
+              v2Share: total > 0 ? Number(((v2Count / total) * 100).toFixed(1)) : 0,
+              minSampleSize,
+              qualityFlags,
+              dimensions: {
+                eventTypes: buildFeedbackAnalyticsBuckets(analyticsRows, (row) => [row.event_type ?? ''], limit),
+                targetTypes: buildFeedbackAnalyticsBuckets(analyticsRows, (row) => [row.target_type ?? ''], limit),
+                platforms: buildFeedbackAnalyticsBuckets(analyticsRows, (row) => [row.platform ?? ''], limit),
+                generationModes: buildFeedbackAnalyticsBuckets(analyticsRows, (row) => [row.generation_mode ?? ''], limit),
+                riskLevels: buildFeedbackAnalyticsBuckets(analyticsRows, (row) => [row.risk_level ?? ''], limit),
+                riskTags: buildFeedbackAnalyticsBuckets(analyticsRows, (row) => parseJsonArray(row.risk_tags), limit),
+                failureReasons: buildFeedbackAnalyticsBuckets(
+                  analyticsRows,
+                  (row) => parseJsonArray(row.failure_reasons),
+                  limit,
+                ),
+              },
+              highValueSamples,
+            },
+          },
+          200,
+          request,
+          env,
+        );
+      } catch (error: unknown) {
+        if (error instanceof Response) {
+          return new Response(error.body, { status: error.status, headers: getCorsHeaders(request, env) });
+        }
+        console.error('Feedback analytics error:', error);
         return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
       }
     }
