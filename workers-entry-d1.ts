@@ -1099,6 +1099,10 @@ export default {
         if (request.method !== 'GET') {
           return jsonResponse({ success: false, error: 'Method not allowed' }, 405, request, env);
         }
+        if (!env.DB) {
+          return jsonResponse({ success: false, error: 'Database not configured' }, 500, request, env);
+        }
+        await ensureConversationSchema(env.DB);
 
         const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
         const days = parseAnalyticsDays(url.searchParams.get('days'));
@@ -1120,7 +1124,7 @@ export default {
           bindings.push(source);
         }
 
-        const { results } = await env.DB!
+        const { results } = await env.DB
           .prepare(
             `SELECT rating, event_type, source, target_type, platform, generation_mode, risk_level,
                     risk_tags, failure_reasons, input, prompt, shot_index, comment, created_at
