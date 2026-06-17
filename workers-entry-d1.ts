@@ -57,6 +57,7 @@ const DEFAULT_ALLOWED_ORIGINS = new Set([
 
 const MAX_BODY_BYTES = 12_000;
 const MAX_SYNC_BODY_BYTES = 100_000;
+const MAX_PROJECT_BODY_BYTES = 200_000;
 const MAX_MESSAGE_LENGTH = 2_000;
 const MAX_STYLE_LENGTH = 80;
 const MAX_REFINEMENT_CONTENT_LENGTH = 4_000;
@@ -65,6 +66,9 @@ const MAX_REFINEMENT_INSTRUCTION_LENGTH = 400;
 const MAX_PROJECT_BIBLE_FIELD_LENGTH = 500;
 const MAX_PROJECT_BIBLE_ARRAY_ITEMS = 5;
 const MAX_HEADER_ID_LENGTH = 128;
+const MAX_PROJECT_TITLE_LENGTH = 120;
+const MAX_PROJECT_CREATIVE_INPUT_LENGTH = 2_000;
+const MAX_PROJECT_ID_LENGTH = 128;
 const VALID_REFINEMENT_TARGETS = new Set([
   'full_prompt',
   'negative_prompt',
@@ -72,6 +76,7 @@ const VALID_REFINEMENT_TARGETS = new Set([
   'platform_variant',
   'version',
 ]);
+const VALID_PROJECT_STAGES = new Set(['input', 'diagnosis', 'reconstruct', 'result']);
 
 function getAllowedOrigins(env: Env): Set<string> | '*' {
   if (env.ALLOWED_ORIGINS?.trim() === '*') return '*';
@@ -114,7 +119,7 @@ function getCorsHeaders(request: Request, env: Env): HeadersInit {
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-Session-Id, X-Api-Key',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
@@ -164,6 +169,31 @@ async function readJsonBody(request: Request): Promise<unknown> {
 
   const text = await request.text();
   if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
+    throw new Response(JSON.stringify({ success: false, error: '请求体过大' }), { status: 413 });
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Response(JSON.stringify({ success: false, error: 'JSON 格式无效' }), { status: 400 });
+  }
+}
+
+async function readJsonBodyWithLimit(request: Request, maxBytes: number): Promise<unknown> {
+  const contentType = request.headers.get('Content-Type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new Response(JSON.stringify({ success: false, error: 'Content-Type 必须是 application/json' }), {
+      status: 415,
+    });
+  }
+
+  const contentLength = Number(request.headers.get('Content-Length') ?? '0');
+  if (contentLength > maxBytes) {
+    throw new Response(JSON.stringify({ success: false, error: '请求体过大' }), { status: 413 });
+  }
+
+  const text = await request.text();
+  if (new TextEncoder().encode(text).byteLength > maxBytes) {
     throw new Response(JSON.stringify({ success: false, error: '请求体过大' }), { status: 413 });
   }
 
@@ -387,6 +417,48 @@ type FeedbackAnalyticsBucket = {
   dislikeRate: number;
 };
 
+type ProjectStage = 'input' | 'diagnosis' | 'reconstruct' | 'result';
+
+type ProjectRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  creative_input: string;
+  target_duration: string;
+  target_type: string;
+  stage: ProjectStage;
+  payload: string;
+  shot_count: number;
+  completed_shot_count: number;
+  created_at: number;
+  updated_at: number;
+};
+
+type NormalizedProjectInput = {
+  id: string;
+  title: string;
+  creativeInput: string;
+  targetDuration: string;
+  targetType: string;
+  stage: ProjectStage;
+  payload: Record<string, unknown>;
+  shotCount: number;
+  completedShotCount: number;
+};
+
+type ProjectSummary = {
+  id: string;
+  title: string;
+  creativeInput: string;
+  targetDuration: string;
+  targetType: string;
+  stage: ProjectStage;
+  shotCount: number;
+  completedShotCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
 function parseAnalyticsDays(value: string | null): 7 | 30 | 90 {
   return value === '7' || value === '90' ? Number(value) as 7 | 90 : 30;
 }
@@ -395,6 +467,141 @@ function parseAnalyticsLimit(value: string | null): number {
   const parsed = Number.parseInt(value ?? '', 10);
   if (!Number.isFinite(parsed)) return 10;
   return Math.min(Math.max(parsed, 1), 50);
+}
+
+function parseProjectLimit(value: string | null): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(Math.max(parsed, 1), 100);
+}
+
+function sanitizeProjectId(value: string | null | undefined): string {
+  const normalized = value?.trim() ?? '';
+  if (!normalized || normalized.length > MAX_PROJECT_ID_LENGTH) return '';
+  return /^[a-zA-Z0-9._:-]+$/.test(normalized) ? normalized : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readNestedRecord(source: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = source[key];
+  return isRecord(value) ? value : null;
+}
+
+function readProjectText(
+  body: Record<string, unknown>,
+  workspace: Record<string, unknown>,
+  key: string,
+  fallback = '',
+): string {
+  const direct = body[key];
+  const nested = workspace[key];
+  const value = typeof direct === 'string' ? direct : typeof nested === 'string' ? nested : fallback;
+  return value.trim();
+}
+
+function normalizeProjectStage(value: string): ProjectStage {
+  return VALID_PROJECT_STAGES.has(value) ? (value as ProjectStage) : 'input';
+}
+
+function countProjectShots(workspace: Record<string, unknown>) {
+  const directorKit = readNestedRecord(workspace, 'directorKit');
+  const shotCards = Array.isArray(directorKit?.shotCards) ? directorKit.shotCards : [];
+  const statusMap = readNestedRecord(workspace, 'shotExecutionStatus') ?? {};
+  const completedShotCount = shotCards.reduce((count, shot) => {
+    if (!isRecord(shot)) return count;
+    const shotId = typeof shot.shotId === 'number' ? String(shot.shotId) : '';
+    const status = shotId ? statusMap[shotId] : '';
+    return status && status !== 'pending' ? count + 1 : count;
+  }, 0);
+
+  return {
+    shotCount: shotCards.length,
+    completedShotCount,
+  };
+}
+
+function normalizeProjectPayload(raw: unknown, pathProjectId?: string): NormalizedProjectInput {
+  if (!isRecord(raw)) {
+    throw new Response(JSON.stringify({ success: false, error: '请求体必须是 JSON 对象' }), { status: 400 });
+  }
+
+  const workspace = readNestedRecord(raw, 'workspace') ?? readNestedRecord(raw, 'payload') ?? raw;
+  const rawId = pathProjectId ?? readProjectText(raw, workspace, 'id');
+  const id = sanitizeProjectId(rawId) || generateId();
+  const creativeInput = readProjectText(raw, workspace, 'creativeInput').slice(0, MAX_PROJECT_CREATIVE_INPUT_LENGTH);
+  const rawTitle = readProjectText(raw, workspace, 'title', creativeInput || '未命名项目');
+  const title = (rawTitle || '未命名项目').slice(0, MAX_PROJECT_TITLE_LENGTH);
+  const targetDuration = directorKitTargetDurations.includes(
+    readProjectText(raw, workspace, 'targetDuration') as (typeof directorKitTargetDurations)[number],
+  )
+    ? readProjectText(raw, workspace, 'targetDuration')
+    : '30s';
+  const targetType = directorKitTargetTypes.includes(
+    readProjectText(raw, workspace, 'targetType') as (typeof directorKitTargetTypes)[number],
+  )
+    ? readProjectText(raw, workspace, 'targetType')
+    : 'wasteland';
+  const stage = normalizeProjectStage(readProjectText(raw, workspace, 'stage') || readProjectText(raw, workspace, 'v2State'));
+  const explicitShotCount = typeof raw.shotCount === 'number' && Number.isFinite(raw.shotCount) ? raw.shotCount : null;
+  const explicitCompletedShotCount =
+    typeof raw.completedShotCount === 'number' && Number.isFinite(raw.completedShotCount)
+      ? raw.completedShotCount
+      : null;
+  const counted = countProjectShots(workspace);
+  const shotCount = Math.max(0, Math.floor(explicitShotCount ?? counted.shotCount));
+  const completedShotCount = Math.max(0, Math.min(shotCount, Math.floor(explicitCompletedShotCount ?? counted.completedShotCount)));
+
+  return {
+    id,
+    title,
+    creativeInput,
+    targetDuration,
+    targetType,
+    stage,
+    payload: workspace,
+    shotCount,
+    completedShotCount,
+  };
+}
+
+function projectSummaryFromRow(row: ProjectRow): ProjectSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    creativeInput: row.creative_input,
+    targetDuration: row.target_duration,
+    targetType: row.target_type,
+    stage: row.stage,
+    shotCount: row.shot_count ?? 0,
+    completedShotCount: row.completed_shot_count ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function projectFromRow(row: ProjectRow) {
+  let payload: unknown = null;
+  try {
+    payload = JSON.parse(row.payload) as unknown;
+  } catch {
+    payload = null;
+  }
+
+  return {
+    ...projectSummaryFromRow(row),
+    payload,
+  };
+}
+
+async function getProjectOwner(db: D1Db, projectId: string): Promise<string | null> {
+  const { results } = await db
+    .prepare(`SELECT user_id FROM projects WHERE id = ? LIMIT 1`)
+    .bind(projectId)
+    .all<{ user_id: string }>();
+  return results?.[0]?.user_id ?? null;
 }
 
 function sanitizeAnalyticsFilter(value: string | null, allowed: Set<string>): string {
@@ -600,6 +807,27 @@ function ensureConversationSchema(db: D1Db): Promise<void> {
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_event_type ON feedbacks(event_type)`).bind().run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_platform ON feedbacks(platform)`).bind().run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_feedback_target_type ON feedbacks(target_type)`).bind().run();
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS projects (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          creative_input TEXT,
+          target_duration TEXT,
+          target_type TEXT,
+          stage TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          shot_count INTEGER DEFAULT 0,
+          completed_shot_count INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+      )
+      .bind()
+      .run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_projects_user_updated ON projects(user_id, updated_at DESC)`).bind().run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_projects_user_stage ON projects(user_id, stage)`).bind().run();
   })().catch((error) => {
     schemaReadyPromise = undefined;
     throw error;
@@ -1338,6 +1566,210 @@ export default {
       }
     }
 
+    if (url.pathname === '/api/projects' || url.pathname.startsWith('/api/projects/')) {
+      try {
+        if (!env.DB) {
+          return jsonResponse({ success: false, error: 'Database not configured' }, 500, request, env);
+        }
+
+        await ensureConversationSchema(env.DB);
+        const userId = sanitizeHeaderId(request.headers.get('X-User-Id'), 'anonymous');
+        const pathProjectId = decodeURIComponent(url.pathname.replace(/^\/api\/projects\/?/, '')).trim();
+        const projectId = pathProjectId ? sanitizeProjectId(pathProjectId) : '';
+        if (pathProjectId && !projectId) {
+          return jsonResponse({ success: false, error: 'project id 无效' }, 400, request, env);
+        }
+
+        if (url.pathname === '/api/projects' && request.method === 'GET') {
+          const limit = parseProjectLimit(url.searchParams.get('limit'));
+          const stage = sanitizeAnalyticsFilter(url.searchParams.get('stage'), VALID_PROJECT_STAGES);
+          const search = sanitizeString(url.searchParams.get('q'), 120);
+          const where = ['user_id = ?'];
+          const bindings: unknown[] = [userId];
+
+          if (stage) {
+            where.push('stage = ?');
+            bindings.push(stage);
+          }
+          if (search) {
+            where.push('(title LIKE ? OR creative_input LIKE ? OR target_type LIKE ?)');
+            const like = `%${search}%`;
+            bindings.push(like, like, like);
+          }
+
+          const { results } = await env.DB
+            .prepare(
+              `SELECT id, user_id, title, creative_input, target_duration, target_type, stage, payload,
+                      shot_count, completed_shot_count, created_at, updated_at
+               FROM projects
+               WHERE ${where.join(' AND ')}
+               ORDER BY updated_at DESC
+               LIMIT ?`,
+            )
+            .bind(...bindings, limit)
+            .all<ProjectRow>();
+
+          const projects = (results ?? []).map(projectSummaryFromRow);
+          return jsonResponse({ success: true, data: { projects, count: projects.length } }, 200, request, env);
+        }
+
+        if (url.pathname === '/api/projects' && request.method === 'POST') {
+          const project = normalizeProjectPayload(await readJsonBodyWithLimit(request, MAX_PROJECT_BODY_BYTES));
+          const now = Date.now();
+          const owner = await getProjectOwner(env.DB, project.id);
+          if (owner && owner !== userId) {
+            return jsonResponse({ success: false, error: 'Project id already exists' }, 409, request, env);
+          }
+          await env.DB
+            .prepare(
+              `INSERT INTO projects (
+                id, user_id, title, creative_input, target_duration, target_type, stage, payload,
+                shot_count, completed_shot_count, created_at, updated_at
+              )
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 title = excluded.title,
+                 creative_input = excluded.creative_input,
+                 target_duration = excluded.target_duration,
+                 target_type = excluded.target_type,
+                 stage = excluded.stage,
+                 payload = excluded.payload,
+                 shot_count = excluded.shot_count,
+                 completed_shot_count = excluded.completed_shot_count,
+                 updated_at = excluded.updated_at`,
+            )
+            .bind(
+              project.id,
+              userId,
+              project.title,
+              project.creativeInput,
+              project.targetDuration,
+              project.targetType,
+              project.stage,
+              JSON.stringify(project.payload),
+              project.shotCount,
+              project.completedShotCount,
+              now,
+              now,
+            )
+            .run();
+
+          return jsonResponse(
+            {
+              success: true,
+              data: {
+                id: project.id,
+                title: project.title,
+                createdAt: now,
+                updatedAt: now,
+              },
+            },
+            200,
+            request,
+            env,
+          );
+        }
+
+        if (!projectId) {
+          return jsonResponse({ success: false, error: 'Not found' }, 404, request, env);
+        }
+
+        if (request.method === 'GET') {
+          const { results } = await env.DB
+            .prepare(
+              `SELECT id, user_id, title, creative_input, target_duration, target_type, stage, payload,
+                      shot_count, completed_shot_count, created_at, updated_at
+               FROM projects
+               WHERE user_id = ? AND id = ?
+               LIMIT 1`,
+            )
+            .bind(userId, projectId)
+            .all<ProjectRow>();
+          const row = results?.[0] ?? null;
+          if (!row) {
+            return jsonResponse({ success: false, error: 'Project not found' }, 404, request, env);
+          }
+          return jsonResponse({ success: true, data: projectFromRow(row) }, 200, request, env);
+        }
+
+        if (request.method === 'PUT') {
+          const project = normalizeProjectPayload(await readJsonBodyWithLimit(request, MAX_PROJECT_BODY_BYTES), projectId);
+          const now = Date.now();
+          const owner = await getProjectOwner(env.DB, projectId);
+          if (owner && owner !== userId) {
+            return jsonResponse({ success: false, error: 'Project not found' }, 404, request, env);
+          }
+          const existing = await env.DB
+            .prepare(`SELECT created_at FROM projects WHERE user_id = ? AND id = ? LIMIT 1`)
+            .bind(userId, projectId)
+            .all<{ created_at: number }>();
+          const createdAt = existing.results?.[0]?.created_at ?? now;
+
+          await env.DB
+            .prepare(
+              `INSERT INTO projects (
+                id, user_id, title, creative_input, target_duration, target_type, stage, payload,
+                shot_count, completed_shot_count, created_at, updated_at
+              )
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 title = excluded.title,
+                 creative_input = excluded.creative_input,
+                 target_duration = excluded.target_duration,
+                 target_type = excluded.target_type,
+                 stage = excluded.stage,
+                 payload = excluded.payload,
+                 shot_count = excluded.shot_count,
+                 completed_shot_count = excluded.completed_shot_count,
+                 updated_at = excluded.updated_at`,
+            )
+            .bind(
+              projectId,
+              userId,
+              project.title,
+              project.creativeInput,
+              project.targetDuration,
+              project.targetType,
+              project.stage,
+              JSON.stringify(project.payload),
+              project.shotCount,
+              project.completedShotCount,
+              createdAt,
+              now,
+            )
+            .run();
+
+          return jsonResponse(
+            {
+              success: true,
+              data: {
+                id: projectId,
+                title: project.title,
+                createdAt,
+                updatedAt: now,
+              },
+            },
+            200,
+            request,
+            env,
+          );
+        }
+
+        if (request.method === 'DELETE') {
+          await env.DB.prepare(`DELETE FROM projects WHERE user_id = ? AND id = ?`).bind(userId, projectId).run();
+          return jsonResponse({ success: true, data: { id: projectId } }, 200, request, env);
+        }
+
+        return jsonResponse({ success: false, error: 'Method not allowed' }, 405, request, env);
+      } catch (error: unknown) {
+        if (error instanceof Response) {
+          return new Response(error.body, { status: error.status, headers: getCorsHeaders(request, env) });
+        }
+        console.error('Projects error:', error);
+        return jsonResponse({ success: false, error: '服务器内部错误' }, 500, request, env);
+      }
+    }
+
     if (url.pathname === '/api/user-data') {
       try {
         if (request.method === 'POST') {
@@ -1398,6 +1830,7 @@ export default {
             memory: hasDb,
             database: hasDb ? 'D1 (SQLite)' : 'none',
             structuredOutput: true,
+            projects: hasDb,
             scenarios: ['video'],
             platformVariants: ['Kling', 'Runway', 'Pika', 'Sora', 'Seedance'],
           },

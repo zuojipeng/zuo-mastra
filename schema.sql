@@ -49,3 +49,22 @@ CREATE INDEX IF NOT EXISTS idx_feedback_event_type ON feedbacks(event_type);
 CREATE INDEX IF NOT EXISTS idx_feedback_platform ON feedbacks(platform);
 CREATE INDEX IF NOT EXISTS idx_feedback_target_type ON feedbacks(target_type);
 CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedbacks(created_at DESC);
+
+-- 项目表：用于保存镜词项目工作区，支持项目仪表盘和后续云端同步
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  creative_input TEXT,
+  target_duration TEXT,
+  target_type TEXT,
+  stage TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  shot_count INTEGER DEFAULT 0,
+  completed_shot_count INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_user_updated ON projects(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_projects_user_stage ON projects(user_id, stage);

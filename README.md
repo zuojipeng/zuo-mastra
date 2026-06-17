@@ -58,6 +58,50 @@
 
 按 `X-User-Id` 和可选 `X-Session-Id` 返回最近历史记录。
 
+### Projects API
+
+项目同步接口使用 `X-User-Id` 做用户隔离，payload 可直接保存前端当前的本地项目工作区结构。
+
+#### `GET /api/projects`
+
+查询当前用户项目列表。支持：
+
+- `limit`: 1-100，默认 50
+- `stage`: `input` / `diagnosis` / `reconstruct` / `result`
+- `q`: 搜索标题、创意或目标类型
+
+#### `POST /api/projects`
+
+创建或更新项目。
+
+```json
+{
+  "workspace": {
+    "id": "local-project-id",
+    "title": "废土小镇里，一个旧清洁机器人守护红裙人偶",
+    "creativeInput": "废土小镇里，一个旧清洁机器人守护红裙人偶",
+    "targetDuration": "30s",
+    "targetType": "wasteland",
+    "v2State": "result",
+    "directorKit": {},
+    "shotExecutionStatus": {},
+    "shotResultNotes": {}
+  }
+}
+```
+
+#### `GET /api/projects/:id`
+
+读取单个项目，返回 summary 字段和完整 `payload`。
+
+#### `PUT /api/projects/:id`
+
+按 id 更新项目。若该 id 不存在，会为当前用户创建；若 id 属于其他用户，返回 404。
+
+#### `DELETE /api/projects/:id`
+
+删除当前用户的项目。
+
 ### `GET /api/health`
 
 返回服务健康状态和功能开关。
