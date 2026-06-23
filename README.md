@@ -154,6 +154,23 @@ npm run check:models -- --provider=openai
 - OpenAI `404`：通常是 base URL、模型名或 key 所属平台不匹配。
 - `missing api key`：环境变量未配置。
 
+## Projects API Smoke
+
+本地 Worker：
+
+```bash
+npx --yes wrangler dev --local --port 8787
+PROJECTS_API_BASE_URL=http://127.0.0.1:8787 npm run test:projects
+```
+
+线上 Worker：
+
+```bash
+npm run test:projects
+```
+
+该脚本会验证 `/api/health`、项目列表、项目保存、单项目读取和删除。线上返回 `Not found` 表示 Worker 还没有部署包含 Projects API 的版本。
+
 ## 本地开发
 
 ```bash
@@ -209,7 +226,8 @@ npm run check:models
 │   ├── llm/
 │   └── schemas/
 ├── scripts/
-│   └── check-model-providers.mjs
+│   ├── check-model-providers.mjs
+│   └── projects-api-smoke.mjs
 ├── workers-entry-d1.ts
 ├── schema.sql
 ├── wrangler.toml
