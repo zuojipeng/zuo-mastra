@@ -204,6 +204,14 @@ npx wrangler deploy
 5. 如有 D1 schema 变更，选择 `apply_schema=true`。
 6. 等待 `Projects API production smoke` 通过。
 
+也可以从本地终端安全发布。脚本只从环境变量读取 token，不会把 token 写入命令行：
+
+```bash
+npm run release:worker -- --dry-run
+export CLOUDFLARE_API_TOKEN="<token from your shell/session manager>"
+npm run release:worker -- --deploy --apply-schema
+```
+
 如果 Wrangler 本机 fetch 通道异常，可以先生成 dry-run bundle：
 
 ```bash
@@ -238,6 +246,7 @@ npm run check:models
 │   └── schemas/
 ├── scripts/
 │   ├── check-model-providers.mjs
+│   ├── release-worker.mjs
 │   └── projects-api-smoke.mjs
 ├── workers-entry-d1.ts
 ├── schema.sql
