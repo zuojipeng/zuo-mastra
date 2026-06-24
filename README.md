@@ -195,6 +195,15 @@ npm run check:models
 npx wrangler deploy
 ```
 
+推荐通过 GitHub Actions 手动发布：
+
+1. 在 GitHub 仓库 Secrets 配置 `CLOUDFLARE_API_TOKEN`。
+2. 打开 Actions -> `Worker Release`。
+3. 点击 `Run workflow`。
+4. 选择 `deploy=true`。
+5. 如有 D1 schema 变更，选择 `apply_schema=true`。
+6. 等待 `Projects API production smoke` 通过。
+
 如果 Wrangler 本机 fetch 通道异常，可以先生成 dry-run bundle：
 
 ```bash
@@ -212,7 +221,9 @@ npm run check:models
 
 发布前至少确认：
 - TypeScript check 通过。
+- Worker dry-run bundle 通过。
 - `/api/health` 返回成功。
+- `npm run test:projects` 通过。
 - `/api/v2/director-kit` happy path 返回 `success: true`。
 - 空输入 validation 返回 400。
 - 模型 provider 至少一个可用。

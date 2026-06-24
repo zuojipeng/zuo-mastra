@@ -1,0 +1,88 @@
+name: Worker Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy Worker after quality checks
+        required: true
+        type: boolean
+        default: false
+      apply_schema:
+        description: Apply D1 schema after deploy
+        required: true
+        type: boolean
+        default: false
+      smoke_base_url:
+        description: Projects API smoke base URL
+        required: true
+        type: string
+        default: https://prompt-optimizer.hahazuo460.workers.dev
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build Worker bundle dry run
+        run: npx --yes wrangler deploy --dry-run --outdir /tmp/prompt-optimizer-worker-dry-run
+
+  deploy:
+    name: Deploy Worker
+    runs-on: ubuntu-latest
+    needs: quality
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Deploy Worker
+        run: npx --yes wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Apply D1 schema
+        if: inputs.apply_schema
+        run: npx --yes wrangler d1 execute prompt-optimizer-db --remote --file=schema.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Projects API production smoke
+        run: npm run test:projects
+        env:
+          PROJECTS_API_BASE_URL: ${{ inputs.smoke_base_url }}
+
