@@ -22,16 +22,9 @@ function usage() {
   npm run release:worker -- --smoke-only
 
 Environment:
-  CLOUDFLARE_API_TOKEN     Required for --deploy and --apply-schema
+  CLOUDFLARE_API_TOKEN     Optional when Wrangler login session is available
   PROJECTS_API_BASE_URL    Optional smoke base URL
 `);
-}
-
-function requireCloudflareToken() {
-  if (!process.env.CLOUDFLARE_API_TOKEN?.trim()) {
-    console.error('CLOUDFLARE_API_TOKEN is required for deploy/schema actions.');
-    process.exit(2);
-  }
 }
 
 if (args.has('--help') || args.size === 0) {
@@ -66,7 +59,6 @@ if (smokeOnly) {
   process.exit(0);
 }
 
-requireCloudflareToken();
 run('npm', ['run', 'check']);
 run('npx', ['--yes', 'wrangler', 'deploy']);
 
@@ -75,4 +67,3 @@ if (applySchema) {
 }
 
 run('npm', ['run', 'test:projects']);
-
