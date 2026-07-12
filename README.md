@@ -70,6 +70,14 @@
 - `stage`: `input` / `diagnosis` / `reconstruct` / `result`
 - `q`: 搜索标题、创意或目标类型
 
+每个摘要同时返回派生的交接状态：
+
+- `handoffReady`
+- `handoffBlockingIssueCount`
+- `handoffBlockingReasons`
+
+交接字段从完整 workspace payload 计算，不要求额外 D1 列。
+
 #### `POST /api/projects`
 
 创建或更新项目。

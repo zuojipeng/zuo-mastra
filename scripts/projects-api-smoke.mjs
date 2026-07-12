@@ -39,7 +39,7 @@ function assertStep(name, result, predicate) {
   console.log(JSON.stringify({ step: name, status: result.status, ok: true }));
 }
 
-function buildWorkspace() {
+function buildWorkspace(status = 'pending', resultNote = '') {
   const now = new Date().toISOString();
   return {
     id: PROJECT_ID,
@@ -55,8 +55,8 @@ function buildWorkspace() {
     },
     selectedVersionIndex: 0,
     selectedShotId: 1,
-    shotExecutionStatus: { 1: 'usable' },
-    shotResultNotes: { 1: 'smoke result note' },
+    shotExecutionStatus: { 1: status },
+    shotResultNotes: resultNote ? { 1: resultNote } : {},
   };
 }
 
@@ -82,16 +82,43 @@ async function main() {
 
   const list = await requestJson(baseUrl, '/api/projects?limit=3', { userId });
   assertStep(
-    'list:after-save',
+    'list:blocked',
     list,
-    (json) => json?.success === true && json?.data?.projects?.some((project) => project.id === PROJECT_ID),
+    (json) => json?.success === true && json?.data?.projects?.some((project) =>
+      project.id === PROJECT_ID &&
+      project.handoffReady === false &&
+      project.handoffBlockingIssueCount === 1 &&
+      project.handoffBlockingReasons?.[0] === '镜头 1 未执行'),
+  );
+
+  const update = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
+    method: 'PUT',
+    userId,
+    body: JSON.stringify({ workspace: buildWorkspace('usable', 'smoke result note') }),
+  });
+  assertStep('update:ready', update, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
+
+  const readyList = await requestJson(baseUrl, '/api/projects?limit=3', { userId });
+  assertStep(
+    'list:ready',
+    readyList,
+    (json) => json?.success === true && json?.data?.projects?.some((project) =>
+      project.id === PROJECT_ID &&
+      project.handoffReady === true &&
+      project.handoffBlockingIssueCount === 0 &&
+      Array.isArray(project.handoffBlockingReasons) &&
+      project.handoffBlockingReasons.length === 0),
   );
 
   const detail = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, { userId });
   assertStep(
     'detail',
     detail,
-    (json) => json?.success === true && json?.data?.payload?.id === PROJECT_ID,
+    (json) =>
+      json?.success === true &&
+      json?.data?.payload?.id === PROJECT_ID &&
+      json?.data?.handoffReady === true &&
+      json?.data?.handoffBlockingIssueCount === 0,
   );
 
   const remove = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {

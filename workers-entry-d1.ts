@@ -455,6 +455,9 @@ type ProjectSummary = {
   stage: ProjectStage;
   shotCount: number;
   completedShotCount: number;
+  handoffReady: boolean;
+  handoffBlockingIssueCount: number;
+  handoffBlockingReasons: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -523,6 +526,42 @@ function countProjectShots(workspace: Record<string, unknown>) {
   };
 }
 
+function summarizeProjectHandoff(workspace: Record<string, unknown>) {
+  const directorKit = readNestedRecord(workspace, 'directorKit');
+  const shotCards = Array.isArray(directorKit?.shotCards) ? directorKit.shotCards : [];
+  const statusMap = readNestedRecord(workspace, 'shotExecutionStatus') ?? {};
+  const resultNotes = readNestedRecord(workspace, 'shotResultNotes') ?? {};
+  const handoffBlockingReasons = shotCards.flatMap((shot) => {
+    if (!isRecord(shot) || typeof shot.shotId !== 'number') return [];
+    const shotId = String(shot.shotId);
+    const status = statusMap[shotId];
+    const resultNote = typeof resultNotes[shotId] === 'string' ? resultNotes[shotId].trim() : '';
+    if (status === 'failed' && !resultNote) return [`镜头 ${shot.shotId} 缺失败原因`];
+    if ((status === 'generated' || status === 'usable') && !resultNote) {
+      return [`镜头 ${shot.shotId} 缺素材链接或结果备注`];
+    }
+    if (status !== 'generated' && status !== 'usable' && status !== 'failed') {
+      return [`镜头 ${shot.shotId} 未执行`];
+    }
+    return [];
+  });
+
+  return {
+    handoffReady: shotCards.length > 0 && handoffBlockingReasons.length === 0,
+    handoffBlockingIssueCount: handoffBlockingReasons.length,
+    handoffBlockingReasons,
+  };
+}
+
+function parseProjectRowPayload(row: ProjectRow): Record<string, unknown> | null {
+  try {
+    const payload: unknown = JSON.parse(row.payload);
+    return isRecord(payload) ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeProjectPayload(raw: unknown, pathProjectId?: string): NormalizedProjectInput {
   if (!isRecord(raw)) {
     throw new Response(JSON.stringify({ success: false, error: '请求体必须是 JSON 对象' }), { status: 400 });
@@ -553,7 +592,6 @@ function normalizeProjectPayload(raw: unknown, pathProjectId?: string): Normaliz
   const counted = countProjectShots(workspace);
   const shotCount = Math.max(0, Math.floor(explicitShotCount ?? counted.shotCount));
   const completedShotCount = Math.max(0, Math.min(shotCount, Math.floor(explicitCompletedShotCount ?? counted.completedShotCount)));
-
   return {
     id,
     title,
@@ -567,7 +605,8 @@ function normalizeProjectPayload(raw: unknown, pathProjectId?: string): Normaliz
   };
 }
 
-function projectSummaryFromRow(row: ProjectRow): ProjectSummary {
+function projectSummaryFromRow(row: ProjectRow, parsedPayload = parseProjectRowPayload(row)): ProjectSummary {
+  const handoff = summarizeProjectHandoff(parsedPayload ?? {});
   return {
     id: row.id,
     title: row.title,
@@ -577,21 +616,17 @@ function projectSummaryFromRow(row: ProjectRow): ProjectSummary {
     stage: row.stage,
     shotCount: row.shot_count ?? 0,
     completedShotCount: row.completed_shot_count ?? 0,
+    ...handoff,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 function projectFromRow(row: ProjectRow) {
-  let payload: unknown = null;
-  try {
-    payload = JSON.parse(row.payload) as unknown;
-  } catch {
-    payload = null;
-  }
+  const payload = parseProjectRowPayload(row);
 
   return {
-    ...projectSummaryFromRow(row),
+    ...projectSummaryFromRow(row, payload),
     payload,
   };
 }
@@ -1609,7 +1644,7 @@ export default {
             .bind(...bindings, limit)
             .all<ProjectRow>();
 
-          const projects = (results ?? []).map(projectSummaryFromRow);
+          const projects = (results ?? []).map((row) => projectSummaryFromRow(row));
           return jsonResponse({ success: true, data: { projects, count: projects.length } }, 200, request, env);
         }
 
