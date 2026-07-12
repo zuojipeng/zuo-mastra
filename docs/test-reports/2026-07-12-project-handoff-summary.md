@@ -27,4 +27,13 @@ Gate: Engineering / Test
 
 The first sandboxed smoke could not connect to `127.0.0.1:8787` and failed with `connect EPERM`. Re-running the same command with approved localhost access passed.
 
-Residual risk: this is E4 reproducible local evidence, not E5 production evidence.
+Local phase evidence level: E4 reproducible evidence.
+
+## Production Verification
+
+Worker version `bbfea4f4-2077-4692-9ac5-3f20654f07ee` was deployed without a schema migration.
+
+- Immediate post-deploy smoke: health passed, project list returned transient 404 during propagation.
+- Retry with `npm run release:worker -- --smoke-only`: all eight steps passed against production.
+
+Final evidence level: E5 for Projects API handoff summary behavior.

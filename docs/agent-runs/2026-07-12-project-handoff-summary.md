@@ -3,7 +3,7 @@
 Date: 2026-07-12
 Owner: Backend Engineering Agent
 Reviewers: Architecture Agent + Code Review Agent + Test Agent
-Status: SHIP
+Status: SHIP / PRODUCTION VERIFIED
 
 ## Goal
 
@@ -27,6 +27,10 @@ Project payload remains the source of truth. Summary fields are derived while re
 - Review removed unused handoff fields from normalized write input.
 - Local Worker smoke passed all eight health, CRUD, blocked, ready, detail, and delete steps.
 
+## Production Evidence
+
+DevOps Agent deployed Worker version `bbfea4f4-2077-4692-9ac5-3f20654f07ee`. The immediate smoke observed a transient 404 during propagation; a later `--smoke-only` retry passed all eight production steps.
+
 ## Next Owner
 
-DevOps Agent: deploy the Worker through the approved release path and collect E5 Projects API smoke before claiming production parity.
+Product Agent + Test Agent: verify the frontend cloud summary consumes production handoff reasons in the next browser release check.
