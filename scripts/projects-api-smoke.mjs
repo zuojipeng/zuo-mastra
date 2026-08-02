@@ -41,7 +41,7 @@ function assertStep(name, result, predicate) {
 
 function buildWorkspace(status = 'pending', resultNote = '') {
   const now = new Date().toISOString();
-  return {
+  const workspace = {
     id: PROJECT_ID,
     title: 'Projects API Smoke',
     creativeInput: '废土小镇里，一个旧清洁机器人守护红裙人偶',
@@ -57,7 +57,52 @@ function buildWorkspace(status = 'pending', resultNote = '') {
     selectedShotId: 1,
     shotExecutionStatus: { 1: status },
     shotResultNotes: resultNote ? { 1: resultNote } : {},
+    iterations: [
+      {
+        id: 'iteration-1',
+        createdAt: now,
+        focus: '主体一致性',
+      },
+    ],
+    platformCalibrations: [
+      {
+        id: 'calibration-1',
+        createdAt: now,
+        platform: 'Seedance',
+        outcome: 'validated',
+      },
+    ],
   };
+  if (status !== 'pending') {
+    workspace.shotAttempts = {
+      1: [
+        {
+          id: 'attempt-1',
+          createdAt: now,
+          shotId: 1,
+          provider: 'Runway',
+          model: 'Gen-4.5',
+          status,
+        },
+      ],
+    };
+    workspace.selectedShotAttemptIds = { 1: 'attempt-1' };
+  } else {
+    workspace.shotAttempts = {
+      1: [
+        {
+          id: 'attempt-stale',
+          createdAt: 'invalid-date',
+          shotId: 1,
+          provider: 'Unknown',
+          model: 'Unknown',
+          status: 'generated',
+        },
+      ],
+    };
+    workspace.selectedShotAttemptIds = { 1: 'attempt-stale' };
+  }
+  return workspace;
 }
 
 async function main() {
@@ -88,7 +133,13 @@ async function main() {
       project.id === PROJECT_ID &&
       project.handoffReady === false &&
       project.handoffBlockingIssueCount === 1 &&
-      project.handoffBlockingReasons?.[0] === '镜头 1 未执行'),
+      project.handoffBlockingReasons?.[0] === '镜头 1 未执行' &&
+      project.iterationCount === 1 &&
+      project.latestIterationFocus === '主体一致性' &&
+      project.calibrationCount === 1 &&
+      project.latestCalibrationPlatform === 'Seedance' &&
+      project.latestCalibrationOutcome === 'validated' &&
+      project.selectedAttemptCount === 0),
   );
 
   const update = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
@@ -107,7 +158,11 @@ async function main() {
       project.handoffReady === true &&
       project.handoffBlockingIssueCount === 0 &&
       Array.isArray(project.handoffBlockingReasons) &&
-      project.handoffBlockingReasons.length === 0),
+      project.handoffBlockingReasons.length === 0 &&
+      project.selectedAttemptCount === 1 &&
+      project.latestSelectedAttemptProvider === 'Runway' &&
+      project.latestSelectedAttemptModel === 'Gen-4.5' &&
+      project.latestSelectedAttemptStatus === 'usable'),
   );
 
   const detail = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, { userId });
@@ -118,7 +173,11 @@ async function main() {
       json?.success === true &&
       json?.data?.payload?.id === PROJECT_ID &&
       json?.data?.handoffReady === true &&
-      json?.data?.handoffBlockingIssueCount === 0,
+      json?.data?.handoffBlockingIssueCount === 0 &&
+      json?.data?.iterationCount === 1 &&
+      json?.data?.calibrationCount === 1 &&
+      json?.data?.selectedAttemptCount === 1 &&
+      json?.data?.latestSelectedAttemptProvider === 'Runway',
   );
 
   const remove = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {

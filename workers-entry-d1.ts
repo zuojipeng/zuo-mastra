@@ -458,6 +458,15 @@ type ProjectSummary = {
   handoffReady: boolean;
   handoffBlockingIssueCount: number;
   handoffBlockingReasons: string[];
+  iterationCount: number;
+  latestIterationFocus: string | null;
+  calibrationCount: number;
+  latestCalibrationOutcome: 'validated' | 'rejected' | 'inconclusive' | null;
+  latestCalibrationPlatform: string | null;
+  selectedAttemptCount: number;
+  latestSelectedAttemptProvider: string | null;
+  latestSelectedAttemptModel: string | null;
+  latestSelectedAttemptStatus: 'generated' | 'failed' | 'usable' | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -553,6 +562,69 @@ function summarizeProjectHandoff(workspace: Record<string, unknown>) {
   };
 }
 
+function summarizeProjectEvidence(workspace: Record<string, unknown>) {
+  const iterations = Array.isArray(workspace.iterations)
+    ? workspace.iterations.filter((iteration) => isRecord(iteration) && typeof iteration.focus === 'string')
+    : [];
+  const calibrations = Array.isArray(workspace.platformCalibrations)
+    ? workspace.platformCalibrations.filter((calibration) =>
+      isRecord(calibration) &&
+      typeof calibration.platform === 'string' &&
+      (calibration.outcome === 'validated' ||
+        calibration.outcome === 'rejected' ||
+        calibration.outcome === 'inconclusive'))
+    : [];
+  const latestIteration = iterations[0];
+  const latestCalibration = calibrations[0];
+  const calibrationOutcome = latestCalibration?.outcome;
+  const shotAttempts = readNestedRecord(workspace, 'shotAttempts') ?? {};
+  const selectedAttemptIds = readNestedRecord(workspace, 'selectedShotAttemptIds') ?? {};
+  const selectedAttempts = Object.entries(selectedAttemptIds).flatMap(([shotId, selectedId]) => {
+    if (typeof selectedId !== 'string') return [];
+    const attempts = shotAttempts[shotId];
+    if (!Array.isArray(attempts)) return [];
+    const selected = attempts.find((attempt) =>
+      isRecord(attempt) &&
+      attempt.id === selectedId &&
+      String(attempt.shotId) === shotId &&
+      typeof attempt.createdAt === 'string' &&
+      Number.isFinite(Date.parse(attempt.createdAt)) &&
+      typeof attempt.provider === 'string' &&
+      typeof attempt.model === 'string' &&
+      (attempt.status === 'generated' || attempt.status === 'failed' || attempt.status === 'usable'));
+    return selected && isRecord(selected) ? [selected] : [];
+  });
+  const latestSelectedAttempt = selectedAttempts.reduce<Record<string, unknown> | null>((latest, attempt) => {
+    if (!latest) return attempt;
+    return Date.parse(String(attempt.createdAt)) > Date.parse(String(latest.createdAt)) ? attempt : latest;
+  }, null);
+  const latestSelectedAttemptStatus = latestSelectedAttempt?.status;
+  const normalizedCalibrationOutcome: ProjectSummary['latestCalibrationOutcome'] =
+    calibrationOutcome === 'validated' || calibrationOutcome === 'rejected' || calibrationOutcome === 'inconclusive'
+      ? calibrationOutcome
+      : null;
+  const normalizedSelectedAttemptStatus: ProjectSummary['latestSelectedAttemptStatus'] =
+    latestSelectedAttemptStatus === 'generated' ||
+    latestSelectedAttemptStatus === 'failed' ||
+    latestSelectedAttemptStatus === 'usable'
+      ? latestSelectedAttemptStatus
+      : null;
+
+  return {
+    iterationCount: iterations.length,
+    latestIterationFocus: typeof latestIteration?.focus === 'string' ? latestIteration.focus : null,
+    calibrationCount: calibrations.length,
+    latestCalibrationOutcome: normalizedCalibrationOutcome,
+    latestCalibrationPlatform: typeof latestCalibration?.platform === 'string' ? latestCalibration.platform : null,
+    selectedAttemptCount: selectedAttempts.length,
+    latestSelectedAttemptProvider:
+      typeof latestSelectedAttempt?.provider === 'string' ? latestSelectedAttempt.provider : null,
+    latestSelectedAttemptModel:
+      typeof latestSelectedAttempt?.model === 'string' ? latestSelectedAttempt.model : null,
+    latestSelectedAttemptStatus: normalizedSelectedAttemptStatus,
+  };
+}
+
 function parseProjectRowPayload(row: ProjectRow): Record<string, unknown> | null {
   try {
     const payload: unknown = JSON.parse(row.payload);
@@ -607,6 +679,7 @@ function normalizeProjectPayload(raw: unknown, pathProjectId?: string): Normaliz
 
 function projectSummaryFromRow(row: ProjectRow, parsedPayload = parseProjectRowPayload(row)): ProjectSummary {
   const handoff = summarizeProjectHandoff(parsedPayload ?? {});
+  const evidence = summarizeProjectEvidence(parsedPayload ?? {});
   return {
     id: row.id,
     title: row.title,
@@ -617,6 +690,7 @@ function projectSummaryFromRow(row: ProjectRow, parsedPayload = parseProjectRowP
     shotCount: row.shot_count ?? 0,
     completedShotCount: row.completed_shot_count ?? 0,
     ...handoff,
+    ...evidence,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

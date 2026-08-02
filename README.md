@@ -70,13 +70,17 @@
 - `stage`: `input` / `diagnosis` / `reconstruct` / `result`
 - `q`: 搜索标题、创意或目标类型
 
-每个摘要同时返回派生的交接状态：
+每个摘要同时返回从 workspace payload 派生的交接与生产证据：
 
 - `handoffReady`
 - `handoffBlockingIssueCount`
 - `handoffBlockingReasons`
+- `iterationCount` / `latestIterationFocus`
+- `calibrationCount` / `latestCalibrationPlatform` / `latestCalibrationOutcome`
+- `selectedAttemptCount`
+- `latestSelectedAttemptProvider` / `latestSelectedAttemptModel` / `latestSelectedAttemptStatus`
 
-交接字段从完整 workspace payload 计算，不要求额外 D1 列。
+这些字段从完整 workspace payload 计算，不要求额外 D1 列。只有被项目显式选中的有效镜头尝试才会进入 `selectedAttemptCount` 和最近出片摘要；缺失或旧版 payload 返回 `0` / `null`，不会猜测最新尝试。
 
 #### `POST /api/projects`
 
