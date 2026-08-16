@@ -1,5 +1,5 @@
-const DEFAULT_BASE_URL = 'https://prompt-optimizer.hahazuo460.workers.dev';
 const PROJECT_ID = `smoke-project-${Date.now()}`;
+let cleanupContext = null;
 
 function arg(name) {
   const prefix = `--${name}=`;
@@ -9,6 +9,15 @@ function arg(name) {
 
 function normalizeBaseUrl(value) {
   return value.replace(/\/$/, '');
+}
+
+function hasFlag(name) {
+  return process.argv.includes(`--${name}`);
+}
+
+function isLocalBaseUrl(value) {
+  const { hostname } = new URL(value);
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
 async function requestJson(baseUrl, path, options = {}) {
@@ -33,13 +42,35 @@ async function requestJson(baseUrl, path, options = {}) {
 
 function assertStep(name, result, predicate) {
   if (!result.ok || !predicate(result.json)) {
-    console.error(JSON.stringify({ step: name, status: result.status, response: result.json }, null, 2));
-    process.exit(1);
+    throw new Error(JSON.stringify({ step: name, status: result.status, response: result.json }, null, 2));
   }
   console.log(JSON.stringify({ step: name, status: result.status, ok: true }));
 }
 
-function buildWorkspace(status = 'pending', resultNote = '') {
+function matchesProjectSummary(project, expected) {
+  return (
+    project?.id === PROJECT_ID &&
+    project?.handoffReady === expected.handoffReady &&
+    project?.handoffBlockingIssueCount === expected.handoffBlockingReasons.length &&
+    expected.handoffBlockingReasons.every(
+      (reason, index) => project?.handoffBlockingReasons?.[index] === reason,
+    ) &&
+    project?.selectedAttemptCount === expected.selectedAttemptCount
+  );
+}
+
+function assertProjectDetail(name, result, expected) {
+  assertStep(
+    name,
+    result,
+    (json) =>
+      json?.success === true &&
+      json?.data?.payload?.id === PROJECT_ID &&
+      matchesProjectSummary({ id: PROJECT_ID, ...json.data }, expected),
+  );
+}
+
+function buildWorkspace(status = 'pending', resultNote = '', approvalAttemptId = '') {
   const now = new Date().toISOString();
   const workspace = {
     id: PROJECT_ID,
@@ -83,10 +114,26 @@ function buildWorkspace(status = 'pending', resultNote = '') {
           provider: 'Runway',
           model: 'Gen-4.5',
           status,
+          assetRef: 'b2://jingci-preview/shot-1.mp4',
         },
       ],
     };
     workspace.selectedShotAttemptIds = { 1: 'attempt-1' };
+    if (approvalAttemptId) {
+      workspace.shotApprovalReceipts = {
+        1: {
+          id: 'approval-1',
+          approvedAt: now,
+          shotId: 1,
+          attemptId: approvalAttemptId,
+          provider: 'Runway',
+          model: 'Gen-4.5',
+          assetRef: 'b2://jingci-preview/shot-1.mp4',
+          decisionNote: '已人工复核，可交付。',
+          evidenceKind: 'human_approval',
+        },
+      };
+    }
   } else {
     workspace.shotAttempts = {
       1: [
@@ -106,9 +153,14 @@ function buildWorkspace(status = 'pending', resultNote = '') {
 }
 
 async function main() {
-  const baseUrl = normalizeBaseUrl(
-    arg('base-url') ?? process.env.PROJECTS_API_BASE_URL ?? DEFAULT_BASE_URL,
-  );
+  const configuredBaseUrl = arg('base-url') ?? process.env.PROJECTS_API_BASE_URL;
+  if (!configuredBaseUrl) {
+    throw new Error('Projects API smoke requires --base-url=<url> or PROJECTS_API_BASE_URL.');
+  }
+  const baseUrl = normalizeBaseUrl(configuredBaseUrl);
+  if (!isLocalBaseUrl(baseUrl) && !hasFlag('allow-production')) {
+    throw new Error('Refusing non-local smoke without explicit --allow-production.');
+  }
   const userId = arg('user-id') ?? process.env.PROJECTS_API_USER_ID ?? `projects-api-smoke-${Date.now()}`;
   console.log(JSON.stringify({ baseUrl, userId, projectId: PROJECT_ID }));
 
@@ -124,6 +176,7 @@ async function main() {
     body: JSON.stringify({ workspace: buildWorkspace() }),
   });
   assertStep('save', save, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
+  cleanupContext = { baseUrl, userId };
 
   const list = await requestJson(baseUrl, '/api/projects?limit=3', { userId });
   assertStep(
@@ -142,12 +195,97 @@ async function main() {
       project.selectedAttemptCount === 0),
   );
 
-  const update = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
+  const blockedDetail = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, { userId });
+  assertProjectDetail('detail:blocked', blockedDetail, {
+    handoffReady: false,
+    handoffBlockingReasons: ['镜头 1 未执行'],
+    selectedAttemptCount: 0,
+  });
+
+  const legacyWorkspace = buildWorkspace('usable', 'legacy result note');
+  delete legacyWorkspace.shotAttempts;
+  delete legacyWorkspace.selectedShotAttemptIds;
+  const legacyUpdate = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
+    method: 'PUT',
+    userId,
+    body: JSON.stringify({ workspace: legacyWorkspace }),
+  });
+  assertStep('update:legacy-usable', legacyUpdate, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
+
+  const legacyList = await requestJson(baseUrl, '/api/projects?limit=3', { userId });
+  assertStep(
+    'list:legacy-usable',
+    legacyList,
+    (json) => json?.success === true && json?.data?.projects?.some((project) =>
+      project.id === PROJECT_ID &&
+      project.handoffReady === false &&
+      project.handoffBlockingIssueCount === 1 &&
+      project.handoffBlockingReasons?.[0] === '镜头 1 缺交付审批' &&
+      project.selectedAttemptCount === 0),
+  );
+
+  const legacyDetail = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, { userId });
+  assertProjectDetail('detail:legacy-usable', legacyDetail, {
+    handoffReady: false,
+    handoffBlockingReasons: ['镜头 1 缺交付审批'],
+    selectedAttemptCount: 0,
+  });
+
+  const unapprovedUpdate = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
     method: 'PUT',
     userId,
     body: JSON.stringify({ workspace: buildWorkspace('usable', 'smoke result note') }),
   });
-  assertStep('update:ready', update, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
+  assertStep('update:usable-unapproved', unapprovedUpdate, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
+
+  const unapprovedList = await requestJson(baseUrl, '/api/projects?limit=3', { userId });
+  assertStep(
+    'list:usable-unapproved',
+    unapprovedList,
+    (json) => json?.success === true && json?.data?.projects?.some((project) =>
+      project.id === PROJECT_ID &&
+      project.handoffReady === false &&
+      project.handoffBlockingIssueCount === 1 &&
+      project.handoffBlockingReasons?.[0] === '镜头 1 缺交付审批'),
+  );
+
+  const unapprovedDetail = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, { userId });
+  assertProjectDetail('detail:usable-unapproved', unapprovedDetail, {
+    handoffReady: false,
+    handoffBlockingReasons: ['镜头 1 缺交付审批'],
+    selectedAttemptCount: 1,
+  });
+
+  const staleApprovalUpdate = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
+    method: 'PUT',
+    userId,
+    body: JSON.stringify({ workspace: buildWorkspace('usable', 'smoke result note', 'attempt-stale') }),
+  });
+  assertStep('update:stale-approval', staleApprovalUpdate, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
+
+  const staleApprovalList = await requestJson(baseUrl, '/api/projects?limit=3', { userId });
+  assertStep(
+    'list:stale-approval',
+    staleApprovalList,
+    (json) => json?.success === true && json?.data?.projects?.some((project) =>
+      project.id === PROJECT_ID &&
+      project.handoffReady === false &&
+      project.handoffBlockingReasons?.[0] === '镜头 1 缺交付审批'),
+  );
+
+  const staleApprovalDetail = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, { userId });
+  assertProjectDetail('detail:stale-approval', staleApprovalDetail, {
+    handoffReady: false,
+    handoffBlockingReasons: ['镜头 1 缺交付审批'],
+    selectedAttemptCount: 1,
+  });
+
+  const update = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
+    method: 'PUT',
+    userId,
+    body: JSON.stringify({ workspace: buildWorkspace('usable', 'smoke result note', 'attempt-1') }),
+  });
+  assertStep('update:approved', update, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
 
   const readyList = await requestJson(baseUrl, '/api/projects?limit=3', { userId });
   assertStep(
@@ -185,9 +323,22 @@ async function main() {
     userId,
   });
   assertStep('delete', remove, (json) => json?.success === true && json?.data?.id === PROJECT_ID);
+  cleanupContext = null;
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  if (cleanupContext) {
+    const { baseUrl, userId } = cleanupContext;
+    try {
+      const cleanup = await requestJson(baseUrl, `/api/projects/${encodeURIComponent(PROJECT_ID)}`, {
+        method: 'DELETE',
+        userId,
+      });
+      console.error(JSON.stringify({ step: 'cleanup', status: cleanup.status, ok: cleanup.ok }));
+    } catch (cleanupError) {
+      console.error('Projects API smoke cleanup failed:', cleanupError);
+    }
+  }
   console.error(error);
-  process.exit(1);
+  process.exitCode = 1;
 });

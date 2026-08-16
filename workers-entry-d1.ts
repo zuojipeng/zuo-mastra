@@ -535,6 +535,53 @@ function countProjectShots(workspace: Record<string, unknown>) {
   };
 }
 
+function readSelectedShotAttempt(workspace: Record<string, unknown>, shotId: string) {
+  const shotAttempts = readNestedRecord(workspace, 'shotAttempts') ?? {};
+  const selectedAttemptIds = readNestedRecord(workspace, 'selectedShotAttemptIds') ?? {};
+  const selectedId = selectedAttemptIds[shotId];
+  const attempts = shotAttempts[shotId];
+  if (typeof selectedId !== 'string' || !Array.isArray(attempts)) return null;
+
+  const selected = attempts.find((attempt) =>
+    isRecord(attempt) &&
+    attempt.id === selectedId &&
+    String(attempt.shotId) === shotId &&
+    typeof attempt.createdAt === 'string' &&
+    Number.isFinite(Date.parse(attempt.createdAt)) &&
+    typeof attempt.provider === 'string' &&
+    typeof attempt.model === 'string' &&
+    (attempt.status === 'generated' || attempt.status === 'failed' || attempt.status === 'usable'));
+  return selected && isRecord(selected) ? selected : null;
+}
+
+function hasMatchingShotApproval(
+  workspace: Record<string, unknown>,
+  shotId: string,
+  selectedAttempt: Record<string, unknown> | null,
+) {
+  if (!selectedAttempt || selectedAttempt.status !== 'usable') return false;
+  const approvalReceipts = readNestedRecord(workspace, 'shotApprovalReceipts') ?? {};
+  const receipt = approvalReceipts[shotId];
+  if (!isRecord(receipt)) return false;
+
+  return (
+    receipt.evidenceKind === 'human_approval' &&
+    receipt.attemptId === selectedAttempt.id &&
+    String(receipt.shotId) === shotId &&
+    typeof receipt.approvedAt === 'string' &&
+    Number.isFinite(Date.parse(receipt.approvedAt)) &&
+    typeof receipt.decisionNote === 'string' &&
+    receipt.decisionNote.trim().length > 0 &&
+    typeof selectedAttempt.provider === 'string' &&
+    receipt.provider === selectedAttempt.provider &&
+    typeof selectedAttempt.model === 'string' &&
+    receipt.model === selectedAttempt.model &&
+    typeof selectedAttempt.assetRef === 'string' &&
+    selectedAttempt.assetRef.trim().length > 0 &&
+    receipt.assetRef === selectedAttempt.assetRef
+  );
+}
+
 function summarizeProjectHandoff(workspace: Record<string, unknown>) {
   const directorKit = readNestedRecord(workspace, 'directorKit');
   const shotCards = Array.isArray(directorKit?.shotCards) ? directorKit.shotCards : [];
@@ -545,14 +592,18 @@ function summarizeProjectHandoff(workspace: Record<string, unknown>) {
     const shotId = String(shot.shotId);
     const status = statusMap[shotId];
     const resultNote = typeof resultNotes[shotId] === 'string' ? resultNotes[shotId].trim() : '';
-    if (status === 'failed' && !resultNote) return [`镜头 ${shot.shotId} 缺失败原因`];
+    const reasons: string[] = [];
+    if (status === 'failed' && !resultNote) reasons.push(`镜头 ${shot.shotId} 缺失败原因`);
     if ((status === 'generated' || status === 'usable') && !resultNote) {
-      return [`镜头 ${shot.shotId} 缺素材链接或结果备注`];
+      reasons.push(`镜头 ${shot.shotId} 缺素材链接或结果备注`);
     }
     if (status !== 'generated' && status !== 'usable' && status !== 'failed') {
-      return [`镜头 ${shot.shotId} 未执行`];
+      reasons.push(`镜头 ${shot.shotId} 未执行`);
     }
-    return [];
+    if (status === 'usable' && !hasMatchingShotApproval(workspace, shotId, readSelectedShotAttempt(workspace, shotId))) {
+      reasons.push(`镜头 ${shot.shotId} 缺交付审批`);
+    }
+    return reasons;
   });
 
   return {
@@ -577,22 +628,11 @@ function summarizeProjectEvidence(workspace: Record<string, unknown>) {
   const latestIteration = iterations[0];
   const latestCalibration = calibrations[0];
   const calibrationOutcome = latestCalibration?.outcome;
-  const shotAttempts = readNestedRecord(workspace, 'shotAttempts') ?? {};
   const selectedAttemptIds = readNestedRecord(workspace, 'selectedShotAttemptIds') ?? {};
   const selectedAttempts = Object.entries(selectedAttemptIds).flatMap(([shotId, selectedId]) => {
     if (typeof selectedId !== 'string') return [];
-    const attempts = shotAttempts[shotId];
-    if (!Array.isArray(attempts)) return [];
-    const selected = attempts.find((attempt) =>
-      isRecord(attempt) &&
-      attempt.id === selectedId &&
-      String(attempt.shotId) === shotId &&
-      typeof attempt.createdAt === 'string' &&
-      Number.isFinite(Date.parse(attempt.createdAt)) &&
-      typeof attempt.provider === 'string' &&
-      typeof attempt.model === 'string' &&
-      (attempt.status === 'generated' || attempt.status === 'failed' || attempt.status === 'usable'));
-    return selected && isRecord(selected) ? [selected] : [];
+    const selected = readSelectedShotAttempt(workspace, shotId);
+    return selected ? [selected] : [];
   });
   const latestSelectedAttempt = selectedAttempts.reduce<Record<string, unknown> | null>((latest, attempt) => {
     if (!latest) return attempt;
