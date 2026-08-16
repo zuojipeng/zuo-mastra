@@ -10,6 +10,8 @@ Gate: Engineering / Code Review / Test
 - Local Worker Projects API smoke: PASS, 18/18 steps.
 - Missing base URL guard: PASS, rejected before network access.
 - Non-local target guard: PASS, rejected without `--allow-production` before network access.
+- Production health GET: PASS.
+- Production Projects API smoke: PASS, 18/18 steps against Worker version `283c2a6e-73f2-4d5e-8375-dcb89d5496a1`.
 - `git diff --check`: PASS before final documentation verification.
 
 ## Covered Behavior
@@ -23,4 +25,4 @@ Gate: Engineering / Code Review / Test
 
 ## Evidence Level
 
-Local evidence level: E4 reproducible Worker behavior. Production evidence remains pending explicit deployment approval and an E5 authenticated smoke.
+Evidence level: E5 production behavior. The smoke created a unique timestamped project, verified list/detail summaries for pending, legacy, unapproved, stale, and approved states, then deleted that project.

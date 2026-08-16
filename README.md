@@ -223,8 +223,11 @@ npx wrangler deploy
 ```bash
 npm run release:worker -- --dry-run
 export CLOUDFLARE_API_TOKEN="<token from your shell/session manager>"
-npm run release:worker -- --deploy --apply-schema
+export PROJECTS_API_BASE_URL="https://prompt-optimizer.hahazuo460.workers.dev"
+npm run release:worker -- --deploy --apply-schema --allow-production-smoke
 ```
+
+`--allow-production-smoke` 是写入型生产 smoke 的显式二次门禁。脚本会创建带时间戳的隔离项目并在成功或失败时只清理本轮项目；缺少生产地址或显式开关时，部署前即停止。
 
 如果 Wrangler 本机 fetch 通道异常，可以先生成 dry-run bundle：
 

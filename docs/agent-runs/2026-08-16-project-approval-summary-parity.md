@@ -2,7 +2,7 @@
 
 Date: 2026-08-16
 Owner: Hermes Orchestrator
-Status: READY FOR RELEASE APPROVAL
+Status: DEPLOYED AND VERIFIED
 
 ## Goal
 
@@ -15,12 +15,12 @@ Make cloud project summaries enforce the same product rule as shot handoff: a us
 - Engineering Agent: added selected-attempt and approval-receipt validation to list/detail summary derivation.
 - Code Review Agent: rejected stale, malformed, or mismatched receipts and required old usable payloads to remain readable but blocked.
 - Test Agent: expanded the smoke to cover pending, legacy, unapproved, stale approval, and approved states through list and detail APIs.
-- DevOps Agent: hardened the smoke so it requires an explicit base URL and refuses non-local writes without `--allow-production`.
+- DevOps Agent: deployed commit `c434ddc` as Cloudflare Worker version `283c2a6e-73f2-4d5e-8375-dcb89d5496a1`, passed E5 production smoke, and hardened the local release wrapper. The matching Actions patch remains blocked by missing GitHub OAuth `workflow` scope.
 
 ## Boundary
 
-No D1 migration, production deployment, credential change, object operation, or paid provider call was performed. Approval receipts are application evidence, not identity, legal, or cryptographic proof.
+No D1 migration, credential change, object operation, or paid provider call was performed. The approved production deployment changed only Worker code. Approval receipts are application evidence, not identity, legal, or cryptographic proof.
 
 ## Next Action
 
-After explicit release approval, deploy the exact backend commit and run the production Projects API smoke with the production flag. Then align the frontend receipt validator to the same complete field contract.
+Monitor normal project sync behavior and use the hardened release wrapper for subsequent deployments. Frontend receipt validation was aligned separately in commit `1e0fd1c`.

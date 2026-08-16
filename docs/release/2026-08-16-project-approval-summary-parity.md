@@ -1,7 +1,7 @@
 # Release Packet: Project Approval Summary Parity
 
 Date: 2026-08-16
-Status: READY, NOT DEPLOYED
+Status: DEPLOYED AND VERIFIED
 
 ## Release Unit
 
@@ -17,7 +17,16 @@ Status: READY, NOT DEPLOYED
 - Smoke script syntax: PASS
 - Local Worker CRUD and approval smoke: PASS, 18/18
 - Architecture, code review, and test review: PASS after repair
+- Production health: PASS
+- Production Projects API smoke: PASS, 18/18
 
-## Deployment Gate
+## Deployment Record
 
-Production deployment is not authorized by this packet. After approval, deploy the exact commit, run the smoke with an explicit production base URL and `--allow-production`, and verify both blocked and approved summaries. Roll back if an unapproved or stale receipt becomes ready, existing project CRUD regresses, or the response contract changes unexpectedly.
+- Commit: `c434ddc`
+- Environment: Cloudflare Worker production
+- URL: `https://prompt-optimizer.hahazuo460.workers.dev`
+- Version ID: `283c2a6e-73f2-4d5e-8375-dcb89d5496a1`
+- Schema migration: none
+- Rollback point: `9f3ecbf`
+
+Rollback was not required. Unapproved, legacy, and stale receipts remained blocked; a complete matching receipt became ready; project CRUD and cleanup passed.
